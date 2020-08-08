@@ -1,1 +1,7 @@
 */target
+*/build
+*.bin
+*.o
+
+/target
+/build
