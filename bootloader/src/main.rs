@@ -10,5 +10,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 #[no_mangle]
 extern "C" fn _start() -> ! {
+    unsafe { core::ptr::write(0xb8000 as *mut u16, 0x4141); }
+
     loop {}
 }

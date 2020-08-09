@@ -66,7 +66,7 @@ entry_16:
 
     ; Read 1 additional sector so bootloader ends at 0x8000. Skip LBA 1 because it contains
     ; boot disk descriptor.
-    mov     ebx, 0x7C00 + 2 * 0x200
+    mov     ebx, 0x7C00 + 1 * 0x200
     mov     eax, 2
     call    read_sector
 

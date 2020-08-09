@@ -20,7 +20,7 @@ fn build(command: &str, directory: Option<&Path>, args: &[&str], fail_message: &
     let status = to_run
         .args(args)
         .status()
-        .expect(&format!("Invoking {} failed.", command));
+        .expect(&format!("Invoking `{}` failed.", command));
 
     if !status.success() {
         println!("{}", fail_message);
@@ -129,10 +129,10 @@ fn create_boot_image(early_bootloader: &[u8], bootloader: &[u8], kernel: &[u8],
     
     assert!(std::mem::size_of::<BootDiskDescriptor>() < 512, "Boot disk descriptor is too big.");
 
-    let bootloader_sectors = (bootloader.len() % 512) as u32;
-    let kernel_sectors     = (kernel.len()     % 512) as u32;
+    let bootloader_sectors = (bootloader.len() / 512) as u32;
+    let kernel_sectors     = (kernel.len()     / 512) as u32;
 
-    let first_free_lba = (early_bootloader.len() % 512 + 1) as u32;
+    let first_free_lba = (early_bootloader.len() / 512 + 1) as u32;
     let bootloader_lba = first_free_lba;
     let kernel_lba     = bootloader_lba + bootloader_sectors;
 
@@ -209,7 +209,7 @@ fn main() {
         ],
         "Building bootloader `early.asm` component failed.",
     ) {
-        return;
+        std::process::exit(1);
     }
 
     println!("\nCompiling bootloader...");
@@ -221,7 +221,7 @@ fn main() {
         ],
         "Building bootloader failed.",
     ) {
-        return;
+        std::process::exit(1);
     }
 
     println!("\nCompiling kernel...");
@@ -233,7 +233,7 @@ fn main() {
         ],
         "Building kernel failed.",
     ) {
-        return;
+        std::process::exit(1);
     }
 
     let early_bootloader = std::fs::read(make_path!(bootloader_build_dir, "early.bin"))
