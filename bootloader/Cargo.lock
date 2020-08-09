@@ -9,4 +9,9 @@ name = "bootloader"
 version = "0.1.0"
 dependencies = [
  "asmlink",
+ "libc_routines",
 ]
+
+[[package]]
+name = "libc_routines"
+version = "0.1.0"

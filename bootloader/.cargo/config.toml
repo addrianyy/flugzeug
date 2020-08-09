@@ -3,7 +3,7 @@ target = "i586-unknown-none.json"
 
 [target.i586-unknown-none]
 rustflags = [
-    "-C", "link-args=-image-base=0x8000",
+    "-C", "link-args=-image-base=0x10000",
     "-C", "relocation-model=static",
 ]
 

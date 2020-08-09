@@ -3,3 +3,10 @@
 [[package]]
 name = "kernel"
 version = "0.1.0"
+dependencies = [
+ "libc_routines",
+]
+
+[[package]]
+name = "libc_routines"
+version = "0.1.0"

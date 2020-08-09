@@ -1,3 +1,4 @@
+#![no_std]
 #![no_builtins]
 
 #[no_mangle]

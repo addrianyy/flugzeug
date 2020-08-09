@@ -352,7 +352,7 @@ entry_16_continue:
 
     ; Compare hash with checksum.
     mov     word [error_string_addr], checksum_error_str
-    cmp     ebx, [BOOT_DISK_DESC + 16]
+    cmp     ebx, [BOOT_DISK_DESC + 12]
     jne     error_16
 
     ; Enable A20 line.
@@ -394,6 +394,8 @@ entry_32:
     mov     es, ax
     mov     ss, ax
     mov     fs, ax
+
+    push BOOT_DISK_DESC
 
     ; Get bootloader entrypoint and jump there.
     mov     eax, dword [BOOTLOADER_BASE + 0x18]
