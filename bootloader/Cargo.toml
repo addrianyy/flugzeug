@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 libc_routines = { path = "../libs/libc_routines" }
+cpu = { path = "../libs/cpu" }
 
 [build-dependencies]
 asmlink = { path = "../libs/asmlink" }

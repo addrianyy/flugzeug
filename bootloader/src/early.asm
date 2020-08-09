@@ -285,7 +285,6 @@ times 510 - ($ - $$) db 0x00
 dw 0xaa55
 
 %define BDD_SIGNATURE   0x1778cf9d
-%define BDD_SIZE        512
 %define BOOT_DISK_DESC  0x8000
 %define BOOTLOADER_BASE 0x10000
 
@@ -338,8 +337,23 @@ entry_16_continue:
 
     ; Hash every byte using FNV-1a.
     .hash_byte:
+        ; Convert address to segment & offset.
+        mov     edx, esi
+        shr     edx, 4
+        mov     ds,  dx
+        mov     edx, esi
+        and     edx, 0b1111
+        
+        push    esi
+        mov     si, dx
+
         ; hash = hash ^ byte.
-        movzx   eax, byte [esi]
+        movzx   eax, byte [ds:si]
+
+        ; Restore ESI and segment registers.
+        pop     esi
+        call    fix_segs
+
         xor     ebx, eax
 
         ; hash = hash * FNV_prime (16777619)
@@ -396,9 +410,9 @@ entry_32:
     mov     es, ax
     mov     ss, ax
     mov     fs, ax
+    mov     gs, ax
 
     push    BOOT_DISK_DESC
-    push    BOOT_DISK_DESC + BDD_SIZE
     push    disk_bios_data
 
     ; Get bootloader entrypoint and jump there.
