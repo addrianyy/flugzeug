@@ -5,7 +5,6 @@ target = "i586-unknown-none.json"
 rustflags = [
     "-C", "link-args=-image-base=0x8000",
     "-C", "relocation-model=static",
-    "-C", "link-args=../build/bootloader/low_level.o",
 ]
 
 [unstable]

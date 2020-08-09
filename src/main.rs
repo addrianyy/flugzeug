@@ -9,12 +9,12 @@ fn build(command: &str, directory: Option<&Path>, args: &[&str], fail_message: &
         to_run.current_dir(directory);
     }
 
-    let s = to_run
+    let status = to_run
         .args(args)
         .status()
         .expect(&format!("Invoking {} failed.", command));
 
-    if !s.success() {
+    if !status.success() {
         println!("{}", fail_message);
 
         false
@@ -66,19 +66,6 @@ fn main() {
             make_path!(bootloader_build_dir, "early.bin"),
         ],
         "Building bootloader `early.asm` component failed.",
-    ) {
-        return;
-    }
-
-    println!("\nCompiling low level bootloader routines...");
-    if !build(
-        "nasm", None,
-        &[
-            make_path!(bootloader_dir, "src", "low_level.asm"),
-            "-felf32", "-o",
-            make_path!(bootloader_build_dir, "low_level.o"),
-        ],
-        "Building bootloader `low_level.asm` component failed.",
     ) {
         return;
     }
