@@ -5,11 +5,11 @@ use std::fs;
 use elfparse::{Elf, Bitness};
 use bdd::BootDiskDescriptor;
 
-// 1 kilobyte
+// Don't change. Hardcoded in bootloader assembly file.
 const MAX_EARLY_BOOTLOADER_SIZE: usize = 1024;
-
-// 400 kilobytes
-const MAX_BOOTLOADER_SIZE: usize = 400 * 1024;
+const MAX_BOOTLOADER_SIZE:       usize = 400 * 1024;
+const BDD_SIZE:                  usize = 512;
+const BOOTLOADER_BASE:           u64   = 0x10000;
 
 fn build(command: &str, directory: Option<&Path>, args: &[&str], fail_message: &str) -> bool {
     let mut to_run = Command::new(command);
@@ -39,7 +39,7 @@ fn prepare_bootloader_binary(binary: Vec<u8>) -> (Vec<u8>, u32) {
     let elf = Elf::parse(&binary).expect("Failed to parse bootloader ELF.");
 
     assert!(elf.bitness() == Bitness::Bits32, "Bootloader is not 32 bit.");
-    assert!(elf.base_address() == 0x10000, "Bootloader has invalid base address.");
+    assert!(elf.base_address() == BOOTLOADER_BASE, "Bootloader has invalid base address.");
 
     let mut mapped = Vec::new();
 
@@ -104,7 +104,8 @@ fn create_boot_image(early_bootloader: &[u8], bootloader: &[u8], kernel: &[u8],
     assert!(bootloader.len() % 4096 == 0, "Bootloader size is not aligned.");
     assert!(kernel.len() % 4096 == 0, "Kernel size is not aligned.");
     
-    assert!(std::mem::size_of::<BootDiskDescriptor>() <= 512, "Boot disk descriptor is too big.");
+    assert!(std::mem::size_of::<BootDiskDescriptor>() <= BDD_SIZE,
+            "Boot disk descriptor is too big.");
 
     let bootloader_sectors = (bootloader.len() / 512) as u32;
     let kernel_sectors     = (kernel.len()     / 512) as u32;

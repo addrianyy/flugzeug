@@ -3,6 +3,7 @@
 pub const SIGNATURE: u32 = 0x1778cf9d;
 
 #[repr(C)]
+// Don't change offsets, they are hardcoded in bootloader assembly file.
 pub struct BootDiskDescriptor {
     pub signature:           u32,
     pub bootloader_lba:      u32,

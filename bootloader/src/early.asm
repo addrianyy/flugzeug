@@ -2,12 +2,12 @@
 [bits 16]
 
 ; VGA memory address.
-%define VGA_ADDR 0xB8000
+%define VGA_ADDR 0xb8000
 
 ; VGA memory size (in words).
 %define VGA_SIZE_WORDS 25 * 80
 
-; Ensure CS == 0 and IP == 0x7C00.
+; Ensure that CS == 0 and IP == 0x7C00.
 jmp 0x00:entry_16
 
 ; 16 bit entry point for bootloader.
@@ -66,11 +66,11 @@ entry_16:
 
     ; Read 1 additional sector so bootloader ends at 0x8000. Skip LBA 1 because it contains
     ; boot disk descriptor.
-    mov     ebx, 0x7C00 + 1 * 0x200
+    mov     ebx, 0x7c00 + 1 * 0x200
     mov     eax, 2
     call    read_sector
 
-    ; We are out of space so jump to newly loaded part.
+    ; We are out of space so jump to newly loaded part of bootloader.
     jmp     entry_16_continue
 
 ; Read disk sector into buffer. Works only with 16 byte aligned buffers
@@ -226,7 +226,7 @@ error_16:
     mov     es, ax
     xor     di, di
 
-    ; 0x0e00 = red background.
+    ; 0x0e00 = yellow background.
     mov     ax, 0x0e00
 
     ; Fill the screen.
@@ -262,6 +262,7 @@ error_16:
 
 ; Information about boot disk. Gets filled by entry point and is used
 ; by lba_to_chs and read_sector.
+disk_bios_data:
 disk_number:            db 0
 sectors_per_track:      dd 0
 heads_per_cylinder:     dd 0
@@ -284,6 +285,7 @@ times 510 - ($ - $$) db 0x00
 dw 0xaa55
 
 %define BDD_SIGNATURE   0x1778cf9d
+%define BDD_SIZE        512
 %define BOOT_DISK_DESC  0x8000
 %define BOOTLOADER_BASE 0x10000
 
@@ -310,16 +312,16 @@ entry_16_continue:
     mov     ecx, 0
 
     .load_sector:
-        call read_sector
+        call    read_sector
 
         ; Go to next sector.
-        inc eax
-        add ebx, 512
-        inc ecx
+        inc     eax
+        add     ebx, 512
+        inc     ecx
 
         ; Check if we are done.
-        cmp ecx, edx
-        jb  .load_sector
+        cmp     ecx, edx
+        jb      .load_sector
 
     ; Get bootloader base.
     mov     esi, BOOTLOADER_BASE
@@ -360,7 +362,7 @@ entry_16_continue:
     test    al, 0x02
     jnz     after_enable
     or      al, 0x02
-    and     al, 0xFE
+    and     al, 0xfe
     out     0x92, al
     after_enable:
 
@@ -395,7 +397,9 @@ entry_32:
     mov     ss, ax
     mov     fs, ax
 
-    push BOOT_DISK_DESC
+    push    BOOT_DISK_DESC
+    push    BOOT_DISK_DESC + BDD_SIZE
+    push    disk_bios_data
 
     ; Get bootloader entrypoint and jump there.
     mov     eax, dword [BOOTLOADER_BASE + 0x18]
@@ -408,8 +412,8 @@ checksum_error_str:  db "CHKSUM FAIL.",  0
 align 8
 gdt_32:
     dq 0x0000000000000000 ; Null segment.
-    dq 0x00CF9A000000FFFF ; Code segment.
-    dq 0x00CF92000000FFFF ; Data segment.
+    dq 0x00cf9a000000ffff ; Code segment.
+    dq 0x00cf92000000ffff ; Data segment.
     .r:
         dw (.r - gdt_32) - 1
         dd gdt_32
