@@ -104,7 +104,7 @@ extern "C" fn _start(_boot_disk_descriptor: u32, _boot_disk_data: u32) -> ! {
 
         // Don't do anything with this entry if ACPI bit 0 is not set. It should be skipped.
         // If BIOS didn't set it we assume it's valid.
-        if entry.acpi & 1 != 0 {
+        if entry.acpi & 1 != 0 && entry.size != 0 {
             let _ = write!(serial, "{:x?}\n", entry);
         }
 
