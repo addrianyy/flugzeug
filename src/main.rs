@@ -3,6 +3,7 @@ use std::path::Path;
 use std::fs;
 
 use elfparse::{Elf, Bitness};
+use bdd::BootDiskDescriptor;
 
 // 1 kilobyte
 const MAX_EARLY_BOOTLOADER_SIZE: usize = 1024;
@@ -30,17 +31,6 @@ fn build(command: &str, directory: Option<&Path>, args: &[&str], fail_message: &
         println!("Done!");
         true
     }
-}
-
-fn hash(bytes: &[u8]) -> u32 {
-    let mut hash = 0x811c_9dc5_u32;
-
-    for &byte in bytes {
-        hash ^= byte as u32;
-        hash = hash.wrapping_mul(16_777_619);
-    }
-
-    hash
 }
 
 fn prepare_bootloader_binary(binary: Vec<u8>) -> (Vec<u8>, u32) {
@@ -78,13 +68,13 @@ fn prepare_bootloader_binary(binary: Vec<u8>) -> (Vec<u8>, u32) {
 
     pad!(((mapped.len() + 0xfff) & !0xfff) - mapped.len());
 
-    let hash = hash(&mapped);
+    let checksum = bdd::checksum(&mapped);
 
     println!("Bootloader base is {:#x}.", elf.base_address());
     println!("Bootloader size is {:#x}.", mapped.len());
-    println!("Bootloader hash is {:#x}.", hash);
+    println!("Bootloader checksum is {:#x}.", checksum);
 
-    (mapped, hash)
+    (mapped, checksum)
 }
 
 fn prepare_kernel_binary(mut binary: Vec<u8>) -> (Vec<u8>, u32) {
@@ -96,26 +86,13 @@ fn prepare_kernel_binary(mut binary: Vec<u8>) -> (Vec<u8>, u32) {
 
     assert!(elf.bitness() == Bitness::Bits64, "Kernel is not 64 bit.");
 
-    let hash = hash(&binary);
+    let checksum = bdd::checksum(&binary);
 
     println!("Kernel base is {:#x}.", elf.base_address());
     println!("Kernel size is {:#x}.", binary.len());
-    println!("Kernel hash is {:#x}.", hash);
+    println!("Kernel checksum is {:#x}.", checksum);
 
-    (binary, hash)
-}
-
-const BDD_SIGNATURE: u32 = 0x1778cf9d;
-
-#[repr(C)]
-struct BootDiskDescriptor {
-    signature:           u32,
-    bootloader_lba:      u32,
-    bootloader_sectors:  u32,
-    bootloader_checksum: u32,
-    kernel_lba:          u32,
-    kernel_sectors:      u32,
-    kernel_checksum:     u32,
+    (binary, checksum)
 }
 
 fn create_boot_image(early_bootloader: &[u8], bootloader: &[u8], kernel: &[u8],
@@ -127,17 +104,19 @@ fn create_boot_image(early_bootloader: &[u8], bootloader: &[u8], kernel: &[u8],
     assert!(bootloader.len() % 4096 == 0, "Bootloader size is not aligned.");
     assert!(kernel.len() % 4096 == 0, "Kernel size is not aligned.");
     
-    assert!(std::mem::size_of::<BootDiskDescriptor>() < 512, "Boot disk descriptor is too big.");
+    assert!(std::mem::size_of::<BootDiskDescriptor>() <= 512, "Boot disk descriptor is too big.");
 
     let bootloader_sectors = (bootloader.len() / 512) as u32;
     let kernel_sectors     = (kernel.len()     / 512) as u32;
 
+    // Add 1 to skip BDD.
     let first_free_lba = (early_bootloader.len() / 512 + 1) as u32;
+
     let bootloader_lba = first_free_lba;
     let kernel_lba     = bootloader_lba + bootloader_sectors;
 
     let bdd = BootDiskDescriptor {
-        signature: BDD_SIGNATURE,
+        signature: bdd::SIGNATURE,
         bootloader_lba,
         bootloader_sectors,
         bootloader_checksum,
@@ -241,7 +220,7 @@ fn main() {
 
     let bootloader = std::fs::read(make_path!(bootloader_build_dir, "i586-unknown-none",
                                               "release", "bootloader"))
-        .expect("Failed to read kernel binary.");
+        .expect("Failed to read bootloader binary.");
 
     let kernel = std::fs::read(make_path!(kernel_build_dir, "x86_64-unknown-none",
                                           "release", "kernel"))

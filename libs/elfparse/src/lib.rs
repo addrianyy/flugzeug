@@ -79,7 +79,7 @@ impl<'a> Elf<'a> {
             if segment.load {
                 let new_base = match base_address {
                     Some(base) => core::cmp::min(base, segment.virt_addr),
-                    None       => segment.virt_addr
+                    None       => segment.virt_addr,
                 };
 
                 base_address = Some(new_base);
