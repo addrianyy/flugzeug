@@ -3,6 +3,8 @@
 
 extern crate libc_routines;
 
+mod bios;
+
 use core::fmt::Write;
 
 #[panic_handler]
@@ -56,23 +58,21 @@ impl core::fmt::Write for SerialPort {
     }
 }
 
-
-extern {
-    fn bios_interrupt();
-}
-
 #[no_mangle]
 extern "C" fn _start(boot_disk_descriptor: u32, boot_disk_data: u32) -> ! {
     unsafe { core::ptr::write(0xb8000 as *mut u16, 0x4343); }
 
     let mut serial = unsafe { SerialPort::new() };
-    write!(serial, "{:X} {:x}", boot_disk_descriptor, boot_disk_data);
+    let _ = write!(serial, "{:X} {:x}", boot_disk_descriptor, boot_disk_data);
 
-    /*
     unsafe {
-        bios_interrupt();
+        bios::interrupt(0x10, &mut bios::RegisterState {
+            eax: 0x0003,
+            ..Default::default()
+        });
     }
-    */
+
+    unsafe { core::ptr::write(0xb8000 as *mut u16, 0x4141); }
 
     loop {}
 }
