@@ -415,9 +415,9 @@ entry_32:
     push    BOOT_DISK_DESC
     push    disk_bios_data
 
-    ; Get bootloader entrypoint and jump there.
+    ; Get bootloader entrypoint and call it.
     mov     eax, dword [BOOTLOADER_BASE + 0x18]
-    jmp     eax
+    call    eax
 
 signature_error_str: db "SIG FAIL.",  0
 checksum_error_str:  db "CHKSUM FAIL.",  0
