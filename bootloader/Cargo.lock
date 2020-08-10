@@ -5,10 +5,20 @@ name = "asmlink"
 version = "0.1.0"
 
 [[package]]
+name = "boot_block"
+version = "0.1.0"
+dependencies = [
+ "lock",
+ "rangeset",
+ "serial_port",
+]
+
+[[package]]
 name = "bootloader"
 version = "0.1.0"
 dependencies = [
  "asmlink",
+ "boot_block",
  "cpu",
  "libc_routines",
  "lock",

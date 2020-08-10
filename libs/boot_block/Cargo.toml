@@ -1,0 +1,10 @@
+[package]
+name = "boot_block"
+version = "0.1.0"
+authors = ["addrianyy <adrianvpl@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+serial_port = { path = "../serial_port" }
+rangeset = { path = "../rangeset" }
+lock = { path = "../lock" }

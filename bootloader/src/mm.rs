@@ -1,27 +1,23 @@
 use core::alloc::{GlobalAlloc, Layout};
 use rangeset::{RangeSet, Range};
-use lock::Lock;
+use crate::BOOT_BLOCK;
 use crate::bios;
-
-struct PhysicalMemory(RangeSet);
-
-static PHYS_MEM: Lock<Option<PhysicalMemory>> = Lock::new(None);
 
 pub struct GlobalAllocator;
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        PHYS_MEM.lock().as_mut().and_then(|physmem| {
-            physmem.0.allocate(layout.size() as u64, layout.align() as u64)
+        BOOT_BLOCK.free_memory.lock().as_mut().and_then(|memory| {
+            memory.allocate(layout.size() as u64, layout.align() as u64)
         }).unwrap_or(0) as *mut u8
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        PHYS_MEM.lock().as_mut().and_then(|physmem| {
+        BOOT_BLOCK.free_memory.lock().as_mut().and_then(|memory| {
             let start = ptr as u64;
             let end   = start.checked_add(layout.size().checked_sub(1)? as u64)?;
 
-            physmem.0.insert(Range { start, end });
+            memory.insert(Range { start, end });
 
             Some(())
         }).expect("Failed to free memory.");
@@ -32,12 +28,15 @@ unsafe impl GlobalAlloc for GlobalAllocator {
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
 #[alloc_error_handler]
-fn alloc_error_handler(_layout: core::alloc::Layout) -> ! {
-    panic!("Allocation failure!");
+fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
+    panic!("Allocation of memory with layout {:?} failed!", layout);
 }
 
-fn get_memory_map() -> RangeSet {
-    let mut memory = RangeSet::new();
+pub unsafe fn initialize() {
+    let mut free_memory = BOOT_BLOCK.free_memory.lock();
+    let mut memory      = RangeSet::new();
+
+    assert!(free_memory.is_none(), "Bootloader memory manager was already initialized.");
 
     // Do two passes because some BIOSes are broken.
     for &cleanup_pass in &[false, true] {
@@ -76,7 +75,7 @@ fn get_memory_map() -> RangeSet {
                 ..Default::default()
             };
 
-            unsafe { bios::interrupt(0x15, &mut regs); }
+            bios::interrupt(0x15, &mut regs);
 
             // Update current sequence so BIOS will know which entry to report
             // in the next iteration.
@@ -113,13 +112,5 @@ fn get_memory_map() -> RangeSet {
     // Remove first 1MB of memory, we store some data there which we don't want to overwrite.
     memory.remove(Range { start: 0, end: 1024 * 1024 - 1 });
 
-    memory
-}
-
-pub unsafe fn initialize() {
-    let mut physmem = PHYS_MEM.lock();
-
-    assert!(physmem.is_none(), "Bootloader memory manager was already initialized.");
-
-    *physmem = Some(PhysicalMemory(get_memory_map()));
+    *free_memory = Some(memory);
 }

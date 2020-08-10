@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 libc_routines = { path = "../libs/libc_routines" }
 serial_port = { path = "../libs/serial_port" }
+boot_block = { path = "../libs/boot_block" }
 rangeset = { path = "../libs/rangeset" }
 lock = { path = "../libs/lock" }
 cpu = { path = "../libs/cpu" }

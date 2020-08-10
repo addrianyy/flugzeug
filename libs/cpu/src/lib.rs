@@ -32,3 +32,14 @@ pub unsafe fn ind(port: u16) -> u32 {
     asm!("in eax, dx", in("dx") port, out("eax") value);
     value
 }
+
+pub fn halt() -> ! {
+    loop {
+        unsafe {
+            asm!(r#"
+                cli
+                hlt
+            "#);
+        }
+    }
+}
