@@ -10,6 +10,7 @@ mod bios;
 mod mm;
 
 use bdd::{BootDiskDescriptor, BootDiskData};
+use elfparse::{Elf, Bitness};
 use boot_block::BootBlock;
 use bios::RegisterState;
 use alloc::vec::Vec;
@@ -102,6 +103,15 @@ fn read_kernel(boot_disk_data: *const BootDiskData,
     kernel
 }
 
+fn load_kernel(kernel: &[u8]) {
+    let elf = Elf::parse(kernel).expect("Failed to parse kernel ELF file.");
+
+    assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
+
+    elf.for_each_segment(|_segment| {
+    });
+}
+
 #[no_mangle]
 extern "C" fn _start(boot_disk_data: *const BootDiskData,
                      boot_disk_descriptor: *const BootDiskDescriptor) -> ! {
@@ -115,6 +125,8 @@ extern "C" fn _start(boot_disk_data: *const BootDiskData,
     let kernel = read_kernel(boot_disk_data, boot_disk_descriptor);
 
     println!("Kernel successfuly read!");
+
+    load_kernel(&kernel);
 
     cpu::halt();
 }

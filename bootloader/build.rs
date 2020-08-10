@@ -1,3 +1,3 @@
 fn main() {
-    asmlink::build_and_link(&["src/low_level.asm"], "elf32");
+    asmlink::build_and_link(&["src/bios.asm"], "elf32");
 }

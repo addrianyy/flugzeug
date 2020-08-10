@@ -25,6 +25,7 @@ dependencies = [
  "bdd",
  "boot_block",
  "cpu",
+ "elfparse",
  "libc_routines",
  "lock",
  "rangeset",
@@ -33,6 +34,10 @@ dependencies = [
 
 [[package]]
 name = "cpu"
+version = "0.1.0"
+
+[[package]]
+name = "elfparse"
 version = "0.1.0"
 
 [[package]]

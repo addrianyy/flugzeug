@@ -18,6 +18,7 @@ pub enum Bitness {
     Bits64 = 64,
 }
 
+#[derive(Clone)]
 pub struct Elf<'a> {
     bytes:            &'a [u8],
     segment_table:    u64,
@@ -28,6 +29,7 @@ pub struct Elf<'a> {
     bitness:          Bitness,
 }
 
+#[derive(Clone)]
 pub struct Segment<'a> {
     pub bytes:     &'a [u8],
     pub virt_addr: u64,
