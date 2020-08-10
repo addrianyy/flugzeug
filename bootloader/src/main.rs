@@ -23,7 +23,7 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
 
     // Make sure that the temporary buffer is accessible for BIOS.
     assert!((temp_buffer.as_ptr() as usize).checked_add(temp_buffer.len()).unwrap() < 0x10000,
-             "Temporary buffer for reading sectors is inaccesible for BIOS.");
+            "Temporary buffer for reading sectors is inaccesible for BIOS.");
 
     for tries in 0..5 {
         // If we have failed before, restart boot disk system.
@@ -72,7 +72,7 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
             return;
         }
 
-        println!("Retrying...");
+        println!("Retrying disk read...");
     }
 
     panic!("Failed to read sector from disk at LBA {}.", lba);

@@ -33,6 +33,10 @@ pub unsafe fn ind(port: u16) -> u32 {
     value
 }
 
+pub unsafe fn invlpg(addr: usize) {
+    asm!("invlpg [{}]", in(reg) addr);
+}
+
 pub fn halt() -> ! {
     loop {
         unsafe {
