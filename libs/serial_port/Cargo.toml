@@ -1,0 +1,8 @@
+[package]
+name = "serial_port"
+version = "0.1.0"
+authors = ["addrianyy <adrianvpl@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+cpu = { path = "../cpu" }

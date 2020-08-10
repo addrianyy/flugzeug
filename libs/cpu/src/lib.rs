@@ -1,6 +1,8 @@
 #![no_std]
 #![feature(asm)]
 
+// Everything here must be exactly the same in 32 bit mode and 64 bit mode.
+
 pub unsafe fn outb(port: u16, value: u8) {
     asm!("out dx, al", in("dx") port, in("al") value);
 }

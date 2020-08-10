@@ -1,5 +1,7 @@
 #![no_std]
 
+// Everything here must be exactly the same in 32 bit mode and 64 bit mode.
+
 use core::convert::TryInto;
 
 macro_rules! read {

@@ -6,6 +6,9 @@ edition = "2018"
 
 [dependencies]
 libc_routines = { path = "../libs/libc_routines" }
+serial_port = { path = "../libs/serial_port" }
+rangeset = { path = "../libs/rangeset" }
+lock = { path = "../libs/lock" }
 cpu = { path = "../libs/cpu" }
 
 [build-dependencies]

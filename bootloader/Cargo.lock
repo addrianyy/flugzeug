@@ -11,6 +11,9 @@ dependencies = [
  "asmlink",
  "cpu",
  "libc_routines",
+ "lock",
+ "rangeset",
+ "serial_port",
 ]
 
 [[package]]
@@ -20,3 +23,18 @@ version = "0.1.0"
 [[package]]
 name = "libc_routines"
 version = "0.1.0"
+
+[[package]]
+name = "lock"
+version = "0.1.0"
+
+[[package]]
+name = "rangeset"
+version = "0.1.0"
+
+[[package]]
+name = "serial_port"
+version = "0.1.0"
+dependencies = [
+ "cpu",
+]
