@@ -96,11 +96,15 @@ extern "C" fn _start(_boot_disk_descriptor: u32, _boot_disk_data: u32) -> ! {
     // Remove first 1MB of memory, we store some data there which we don't want to overwrite.
     memory.remove(Range { start: 0, end: 1024 * 1024 - 1 });
 
+    let mut total_memory = 0;
+
     for entry in memory.entries() {
         let _ = write!(serial, "{:x?}\n", entry);
+
+        total_memory += entry.size();
     }
 
-    let _ = write!(serial, "Done!\n");
+    let _ = write!(serial, "Done. {} bytes of memory detected!\n", total_memory);
 
     loop {}
 }

@@ -105,7 +105,7 @@ impl RangeSet {
                     self.ranges[idx].start = range.end.saturating_add(1);
 
                     // Create left split entry.
-                    self.add_entry(Range { 
+                    self.add_entry(Range {
                         start: current.start,
                         end:   range.start.saturating_sub(1),
                     });
@@ -117,6 +117,78 @@ impl RangeSet {
             // Stop if we haven't found any more subtracts in the whole set.
             break;
         }
+    }
+
+    pub fn allocate(&mut self, size: u64, align: u64) -> Option<usize> {
+        // Zero-sized allocations are not allowed.
+        if size == 0 {
+            return None;
+        }
+
+        // Make sure that alignment is power of two.
+        if align.count_ones() != 1 {
+            return None;
+        }
+
+        // Calculate alignment mask, this can be done because alignment is always power of two.
+        let align_mask = align - 1;
+
+        let mut allocation: Option<(u64, u32, u64, u64)> = None;
+
+        // Try to find the best region for new allocation.
+        for idx in 0..self.used as usize {
+            let current = self.ranges[idx];
+
+            // Calculate the amount of bytes required for front padding to satifsy
+            // alignment requirements.
+            let padding = (align - (current.start & align_mask)) & align_mask;
+
+            // Calculate the actual end of allocation acounting for alignment.
+            let actual_end = current.start.checked_add(size - 1)?.checked_add(padding)?;
+
+            // Make sure that the allocation will fit in this region.
+            if actual_end > current.end {
+                continue;
+            }
+
+            // Make sure that this memory can be accessed by the processor in it's current state.
+            // This library will be used by both 32 bit and 64 bit code.
+            if actual_end > usize::MAX as u64 {
+                continue;
+            }
+
+            // Get the power of 2 of this region alignment.
+            let region_align_power = current.start.trailing_zeros();
+
+            // Check if this region is better than current best.
+            let replace = if let Some(allocation) = allocation {
+                if allocation.0 == padding {
+                    // If both regions waste the same amount of space, pick one with
+                    // smaller alignment.
+                    allocation.1 > region_align_power
+                } else {
+                    // Choose region which wastes less space.
+                    allocation.0 > padding
+                }
+            } else {
+                true
+            };
+
+            // Current region is better then the previous best, replace it.
+            if replace {
+                allocation = Some((padding, region_align_power, current.start, actual_end));
+            }
+        }
+
+        allocation.map(|(padding, _, start, end)| {
+            // We found good region to allocate and it should be removed from the set.
+            // Although padding space is not used, we will remove it too to avoid too big
+            // fragmentation in the set.
+            self.remove(Range { start, end });
+
+            // Align address before returning it.
+            (start + padding) as usize
+        })
     }
 
     fn add_entry(&mut self, range: Range) {
@@ -163,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn test() {
+    fn insert_remove_test() {
         let mut rs = RangeSet::new();
 
         rs.insert(Range { start: 0x1000, end: 0x1fff });
@@ -206,4 +278,17 @@ mod tests {
         panic!("Done!");
     }
 
+    #[test]
+    fn allocate_test() {
+        let mut rs = RangeSet::new();
+
+        rs.insert(Range { start: 0x1000, end: 0x4000 });
+        rs.insert(Range { start: 0x80000, end: 0x400000 });
+        rs.insert(Range { start: 0x9999111100000, end: 0x9f99111100012 });
+
+        println!("{:x?}", rs.allocate(0x1000, 0x100));
+        print_rs(&rs);
+
+        panic!("Done!");
+    }
 }
