@@ -2,3 +2,4 @@
 /build
 *.bin
 *.obj
+serial_output

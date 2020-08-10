@@ -11,6 +11,7 @@ boot_block = { path = "../libs/boot_block" }
 rangeset = { path = "../libs/rangeset" }
 lock = { path = "../libs/lock" }
 cpu = { path = "../libs/cpu" }
+bdd = { path = "../libs/bdd" }
 
 [build-dependencies]
 asmlink = { path = "../libs/asmlink" }

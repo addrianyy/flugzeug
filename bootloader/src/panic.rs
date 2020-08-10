@@ -4,7 +4,7 @@ use core::panic::PanicInfo;
 fn panic(panic_info: &PanicInfo) -> ! {
     println!("Bootloader panic.");
 
-    if let Some(message) = panic_info.payload().downcast_ref::<&str>() {
+    if let Some(message) = panic_info.message() {
         println!("message: {}", message);
     }
 

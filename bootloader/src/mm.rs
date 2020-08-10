@@ -28,7 +28,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
 #[alloc_error_handler]
-fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
+fn alloc_error_handler(layout: Layout) -> ! {
     panic!("Allocation of memory with layout {:?} failed!", layout);
 }
 
