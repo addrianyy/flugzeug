@@ -9,10 +9,13 @@ mod panic;
 mod bios;
 mod mm;
 
-use page_table::{PageTable, PageType, VirtAddr};
+use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
+                 KERNEL_STACK_BASE, KERNEL_STACK_SIZE};
+
+use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_NX};
 use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness};
-use boot_block::BootBlock;
+use core::convert::TryInto;
 use bios::RegisterState;
 use alloc::vec::Vec;
 
@@ -104,8 +107,8 @@ fn read_kernel(boot_disk_data: *const BootDiskData,
     kernel
 }
 
-fn load_kernel(kernel: &[u8]) {
-    let elf = Elf::parse(kernel).expect("Failed to parse kernel ELF file.");
+fn prepare_kernel(kernel: Vec<u8>) -> (u64, u64, u32, u32) {
+    let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
 
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
 
@@ -114,6 +117,9 @@ fn load_kernel(kernel: &[u8]) {
 
     let mut kernel_page_table = PageTable::new(&mut phys_mem)
         .expect("Failed to allocate kernel page table.");
+
+    let mut trampoline_page_table = PageTable::new(&mut phys_mem)
+        .expect("Failed to allocate trampoline page table.");
 
     elf.for_each_segment(|segment| {
         if !segment.load {
@@ -130,6 +136,50 @@ fn load_kernel(kernel: &[u8]) {
                                    }))
             .expect("Failed to map kernel segment.");
     });
+
+    for phys_addr in (0..1024 * 1024).step_by(4096) {
+        unsafe {
+            for &virt_addr in &[VirtAddr(phys_addr),
+                                VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE)] {
+                trampoline_page_table.map_raw(&mut phys_mem, virt_addr, PageType::Page4K,
+                                              phys_addr | PAGE_WRITE | PAGE_PRESENT, true, false)
+                    .expect("Failed to map physical region in the trampoline page table.");
+            }
+        }
+    }
+
+    {
+        let page_type = PageType::Page2M;
+        let page_size = page_type as u64;
+        let page_mask = page_size - 1;
+
+        assert!(KERNEL_PHYSICAL_REGION_BASE & page_mask == 0,
+                "KERNEL_PHYSICAL_REGION_BASE is not aligned.");
+
+        assert!(KERNEL_PHYSICAL_REGION_SIZE & page_mask == 0,
+                "KERNEL_PHYSICAL_REGION_SIZE is not aligned.");
+
+        for phys_addr in (0..KERNEL_PHYSICAL_REGION_SIZE).step_by(page_size as usize) {
+            let virt_addr = VirtAddr(KERNEL_PHYSICAL_REGION_BASE + phys_addr);
+            let raw       = phys_addr | PAGE_PRESENT | PAGE_WRITE | PAGE_NX;
+
+            unsafe {
+                kernel_page_table.map_raw(&mut phys_mem, virt_addr, page_type, raw, true, false)
+                    .expect("Failed to map physical region in the kernel page table.");
+            }
+        }
+    }
+
+    let stack = KERNEL_STACK_BASE;
+
+    kernel_page_table.map(&mut phys_mem, VirtAddr(stack), PageType::Page4K, KERNEL_STACK_SIZE,
+                          true, false)
+        .expect("Failed to map kernel stack.");
+
+    let kernel_cr3:     u32 = kernel_page_table.table().0.try_into().unwrap();
+    let trampoline_cr3: u32 = trampoline_page_table.table().0.try_into().unwrap();
+
+    (elf.entrypoint(), stack, kernel_cr3, trampoline_cr3)
 }
 
 #[no_mangle]
@@ -146,7 +196,7 @@ extern "C" fn _start(boot_disk_data: *const BootDiskData,
 
     println!("Kernel successfuly read!");
 
-    load_kernel(&kernel);
+    prepare_kernel(kernel);
 
     cpu::halt();
 }

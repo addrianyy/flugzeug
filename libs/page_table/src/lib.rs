@@ -63,6 +63,10 @@ impl PageTable {
         }
     }
 
+    pub fn table(&mut self) -> PhysAddr {
+        self.table
+    }
+
     pub fn map(
         &mut self,
         phys_mem:  &mut impl PhysMem,
