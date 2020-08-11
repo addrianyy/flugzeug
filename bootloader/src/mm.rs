@@ -16,6 +16,9 @@ unsafe impl GlobalAlloc for GlobalAllocator {
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         BOOT_BLOCK.free_memory.lock().as_mut().and_then(|memory| {
+            // Create inclusive range for this allocation and give it back to the
+            // free memory set.
+
             let start = ptr as u64;
             let end   = start.checked_add(layout.size().checked_sub(1)? as u64)?;
 
@@ -30,6 +33,9 @@ pub struct PhysicalMemory<'a>(pub &'a mut RangeSet);
 
 impl PhysMem for PhysicalMemory<'_> {
     unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
+        // We don't use paging in the bootloader so physcial address == virtual address.
+        // Just make sure that address fits in pointer and it region doesn't overflow.
+        
         let phys_addr: usize = phys_addr.0.try_into().ok()?;
         let _phys_end: usize = phys_addr.checked_add(size.checked_sub(1)?)?;
 

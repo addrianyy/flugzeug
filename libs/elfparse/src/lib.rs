@@ -29,7 +29,7 @@ pub struct Elf<'a> {
     bitness:          Bitness,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Segment<'a> {
     pub bytes:     &'a [u8],
     pub virt_addr: u64,

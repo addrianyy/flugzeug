@@ -27,6 +27,7 @@ pub trait PhysMem {
         let phys_addr = self.alloc_phys(layout)?;
 
         unsafe {
+            // Translate physical address to virtual one and zero memory.
             let virt_addr = self.translate(phys_addr, layout.size())?;
             core::ptr::write_bytes(virt_addr, 0, layout.size())
         }
@@ -49,6 +50,7 @@ pub struct PageTable {
 
 impl PageTable {
     pub fn new(phys_mem: &mut impl PhysMem) -> Option<Self> {
+        // Allocate empty root table and use it.
         let table = phys_mem.alloc_phys_zeroed(
             Layout::from_size_align(4096, 4096).ok()?)?;
 
@@ -58,6 +60,7 @@ impl PageTable {
     }
 
     pub unsafe fn from_table(table: PhysAddr) -> Self {
+        // Mask off VPID and other stuff from CR3.
         Self {
             table: PhysAddr(table.0 & 0xffffffffff000),
         }
@@ -93,18 +96,25 @@ impl PageTable {
         let page_size = page_type as u64;
         let page_mask = page_size - 1;
 
+        // Make sure both virtual address and size are correctly aligned.
         if size == 0 || size & page_mask != 0 || virt_addr.0 & page_mask != 0 {
             return None;
         }
 
-        let large    = page_type != PageType::Page4K;
+        // If page size is not standard 4K we will need to use PAGE_SIZE bit.
+        let large = page_type != PageType::Page4K;
+
+        // Calculate inclusive end of virtual region and make sure it doesn't overflow.
         let virt_end = virt_addr.0.checked_add(size - 1)?;
 
+        // Go through each page in virtual region.
         for current_virt_addr in (virt_addr.0..=virt_end).step_by(page_size as usize) {
+            // Allocate backing physical page.
             let page = phys_mem.alloc_phys(
                 Layout::from_size_align(page_size as usize,
                                         page_size as usize).unwrap())?;
 
+            // Calculate value of raw page table entry.
             let raw = page.0 | PAGE_PRESENT |
                 if write { PAGE_WRITE } else { 0 } |
                 if exec  { 0 }          else { PAGE_NX } |
@@ -116,11 +126,15 @@ impl PageTable {
                     core::slice::from_raw_parts_mut(bytes, page_size as usize)
                 };
 
-                for (offset, byte) in bytes.iter_mut().enumerate() {
-                    *byte = init(current_virt_addr - virt_addr.0 + offset as u64);
+                // Ask `init` routine to initialize this region.
+                for (byte_offset, byte) in bytes.iter_mut().enumerate() {
+                    let region_offset = current_virt_addr - virt_addr.0;
+
+                    *byte = init(region_offset + byte_offset as u64);
                 }
             }
 
+            // Map current page. Fail it it was already used.
             unsafe {
                 self.map_raw(phys_mem, VirtAddr(current_virt_addr), page_type, raw,
                              true, false)?;
