@@ -7,6 +7,7 @@ use core::alloc::Layout;
 pub const PAGE_PRESENT: u64 = 1 << 0;
 pub const PAGE_WRITE:   u64 = 1 << 1;
 pub const PAGE_USER:    u64 = 1 << 2;
+pub const PAGE_SIZE:    u64 = 1 << 7;
 pub const PAGE_NX:      u64 = 1 << 63;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
@@ -62,8 +63,78 @@ impl PageTable {
         }
     }
 
-    pub unsafe fn map_raw(&mut self, phys_mem: &mut impl PhysMem, virt_addr: VirtAddr,
-                          page_type: PageType, raw: u64, add: bool, update: bool) -> Option<()> {
+    pub fn map(
+        &mut self,
+        phys_mem:  &mut impl PhysMem,
+        virt_addr: VirtAddr,
+        page_type: PageType,
+        size:      u64,
+        write:     bool,
+        exec:      bool,
+    ) -> Option<()> {
+        self.map_init(phys_mem, virt_addr, page_type, size,
+                      write, exec, None::<fn(u64) -> u8>)
+    }
+
+    pub fn map_init(
+        &mut self,
+        phys_mem:  &mut impl PhysMem,
+        virt_addr: VirtAddr,
+        page_type: PageType,
+        size:      u64,
+        write:     bool,
+        exec:      bool,
+        init:      Option<impl Fn(u64) -> u8>,
+    ) -> Option<()> {
+        let page_size = page_type as u64;
+        let page_mask = page_size - 1;
+
+        if size == 0 || size & page_mask != 0 || virt_addr.0 & page_mask != 0 {
+            return None;
+        }
+
+        let large    = page_type != PageType::Page4K;
+        let virt_end = virt_addr.0.checked_add(size - 1)?;
+
+        for current_virt_addr in (virt_addr.0..=virt_end).step_by(page_size as usize) {
+            let page = phys_mem.alloc_phys(
+                Layout::from_size_align(page_size as usize,
+                                        page_size as usize).unwrap())?;
+
+            let raw = page.0 | PAGE_PRESENT |
+                if write { PAGE_WRITE } else { 0 } |
+                if exec  { 0 }          else { PAGE_NX } |
+                if large { PAGE_SIZE }  else { 0 };
+
+            if let Some(init) = &init {
+                let bytes = unsafe {
+                    let bytes = phys_mem.translate(page, page_size as usize)?;
+                    core::slice::from_raw_parts_mut(bytes, page_size as usize)
+                };
+
+                for (offset, byte) in bytes.iter_mut().enumerate() {
+                    *byte = init(current_virt_addr - virt_addr.0 + offset as u64);
+                }
+            }
+
+            unsafe {
+                self.map_raw(phys_mem, VirtAddr(current_virt_addr), page_type, raw,
+                             true, false)?;
+            }
+        }
+
+        Some(())
+    }
+
+    pub unsafe fn map_raw(
+        &mut self,
+        phys_mem:  &mut impl PhysMem,
+        virt_addr: VirtAddr,
+        page_type: PageType,
+        raw:       u64,
+        add:       bool,
+        update:    bool,
+    ) -> Option<()> {
         const U64_SIZE: u64 = core::mem::size_of::<u64>() as u64;
 
         let page_size = page_type as u64;

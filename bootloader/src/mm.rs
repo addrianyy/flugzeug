@@ -1,5 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use rangeset::{RangeSet, Range};
+use page_table::{PhysMem, PhysAddr};
+use core::convert::TryInto;
 use crate::BOOT_BLOCK;
 use crate::bios;
 
@@ -21,6 +23,22 @@ unsafe impl GlobalAlloc for GlobalAllocator {
 
             Some(())
         }).expect("Failed to free memory.");
+    }
+}
+
+pub struct PhysicalMemory<'a>(pub &'a mut RangeSet);
+
+impl PhysMem for PhysicalMemory<'_> {
+    unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
+        let phys_addr: usize = phys_addr.0.try_into().ok()?;
+        let _phys_end: usize = phys_addr.checked_add(size.checked_sub(1)?)?;
+
+        Some(phys_addr as *mut u8)
+    }
+
+    fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
+        self.0.allocate(layout.size() as u64, layout.align() as u64)
+            .map(|addr| PhysAddr(addr as u64))
     }
 }
 

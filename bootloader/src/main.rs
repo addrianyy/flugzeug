@@ -9,6 +9,7 @@ mod panic;
 mod bios;
 mod mm;
 
+use page_table::{PageTable, PageType, VirtAddr};
 use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness};
 use boot_block::BootBlock;
@@ -108,7 +109,26 @@ fn load_kernel(kernel: &[u8]) {
 
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
 
-    elf.for_each_segment(|_segment| {
+    let mut phys_mem = BOOT_BLOCK.free_memory.lock();
+    let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
+
+    let mut kernel_page_table = PageTable::new(&mut phys_mem)
+        .expect("Failed to allocate kernel page table.");
+
+    elf.for_each_segment(|segment| {
+        if !segment.load {
+            return;
+        }
+
+        let virt_addr = VirtAddr(segment.virt_addr & !0xfff);
+        let virt_size = (segment.virt_size + 0xfff) & !0xfff;
+
+        kernel_page_table.map_init(&mut phys_mem, virt_addr, PageType::Page4K, virt_size,
+                                   segment.write, segment.execute,
+                                   Some(|offset| {
+                                       segment.bytes.get(offset as usize).copied().unwrap_or(0)
+                                   }))
+            .expect("Failed to map kernel segment.");
     });
 }
 
