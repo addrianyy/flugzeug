@@ -134,7 +134,7 @@ impl PageTable {
                     *entry_ptr = raw;
 
                     // Check if we can access this virtual address in current processor mode.
-                    let accessible = (virt_addr.0 as u64) < (core::mem::size_of::<usize>() as u64);
+                    let accessible = (virt_addr.0 as u64) <= (usize::MAX as u64);
 
                     // If the entry was already present and virtual address is accessible then
                     // we need to flush TLB.
