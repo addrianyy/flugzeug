@@ -43,7 +43,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
 
     let core_locals_ptr = {
         let mut free_memory = boot_block.free_memory.lock();
-        let free_memory = free_memory.as_mut().unwrap();
+        let free_memory     = free_memory.as_mut().unwrap();
 
         // Allocate core locals using physical allocator, at this stage it is the only
         // allocator available.

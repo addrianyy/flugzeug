@@ -193,6 +193,8 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     // 1MB of memory.
     const TRAMPOLINE_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024;
 
+    assert!(KERNEL_PHYSICAL_REGION_SIZE >= TRAMPOLINE_PHYSICAL_REGION_SIZE);
+
     // Setup trampoline page table.
     for phys_addr in (0..TRAMPOLINE_PHYSICAL_REGION_SIZE).step_by(4096) {
         // Map current `phys_addr` at virtual address `phys_addr` and virtual address
