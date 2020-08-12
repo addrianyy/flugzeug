@@ -93,7 +93,7 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
 
 fn setup_kernel(boot_disk_data: &BootDiskData,
                 boot_disk_descriptor: &BootDiskDescriptor) -> KernelEntryData {
-    // Verify that BDD is valid.
+    // Make sure that the BDD is valid.
     assert!(boot_disk_descriptor.signature == bdd::SIGNATURE, "BDD has invalid signature.");
 
     // Get information about kernel location on disk from BDD.
@@ -125,7 +125,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     let mut phys_mem = BOOT_BLOCK.free_memory.lock();
     let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
 
-    // Allocate page table that will be used by kernel.
+    // Allocate page table that will be used by the kernel.
     let mut kernel_page_table = PageTable::new(&mut phys_mem)
         .expect("Failed to allocate kernel page table.");
 
@@ -149,19 +149,28 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         // Align virtual size up.
         let virt_size = (segment.virt_size + 0xfff) & !0xfff;
 
-        let offset_add = virt_addr.0 - segment.virt_addr;
+        let front_padding = segment.virt_addr - virt_addr.0;
 
         // Map the segment with correct permissions using standard 4K pages.
         // If some segments overlap, this routine will return an error.
         kernel_page_table.map_init(&mut phys_mem, virt_addr, PageType::Page4K, virt_size,
                                    segment.write, segment.execute,
-                                   Some(|offset| {
+                                   Some(|offset: u64| {
                                        // Get a byte for given segment offset. Because
-                                       // we possibly changed segment start virtual address,
-                                       // we need to account for that by adding `offset_add`
-                                       // to the actual offset.
-                                       segment.bytes.get((offset + offset_add) as usize)
-                                           .copied().unwrap_or(0)
+                                       // we possibly changed segment start address,
+                                       // we need to account for that.
+                                       // If offset is part of front padding then return 0,
+                                       // otherwise get actual offset by subtracting
+                                       // `front_padding`.
+
+                                       let offset = match offset.checked_sub(front_padding) {
+                                           Some(offset) => offset,
+                                           None         => return 0,
+                                       };
+
+                                       // Get a byte. If the memory is not initialized then
+                                       // initialize it to 0.
+                                       segment.bytes.get(offset as usize).copied().unwrap_or(0)
                                    }))
             .expect("Failed to map kernel segment.");
     });
