@@ -113,8 +113,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     }
 
     // Make sure that loaded kernel matches our expectations.
-    assert!(bdd::checksum(&kernel) == kernel_checksum,
-            "Loaded kernel has invalid checksum.");
+    assert!(bdd::checksum(&kernel) == kernel_checksum, "Loaded kernel has invalid checksum.");
 
     // Parse the kernel ELF file and make sure that it is 64 bit.
     let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
@@ -156,12 +155,11 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         kernel_page_table.map_init(&mut phys_mem, virt_addr, PageType::Page4K, virt_size,
                                    segment.write, segment.execute,
                                    Some(|offset: u64| {
-                                       // Get a byte for given segment offset. Because
-                                       // we possibly changed segment start address,
-                                       // we need to account for that.
-                                       // If offset is part of front padding then return 0,
-                                       // otherwise get actual offset by subtracting
-                                       // `front_padding`.
+                                       // Get a byte for given segment offset. Because we have
+                                       // possibly changed segment start address,
+                                       // we need to account for that. If offset is part of front
+                                       // padding then return 0, otherwise get actual offset by
+                                       // subtracting `front_padding`.
 
                                        let offset = match offset.checked_sub(front_padding) {
                                            Some(offset) => offset,
@@ -226,7 +224,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         for phys_addr in (0..KERNEL_PHYSICAL_REGION_SIZE).step_by(page_size as usize) {
             // Map current `phys_addr` at virtual address
             // `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`.
-            let virt_addr = VirtAddr(KERNEL_PHYSICAL_REGION_BASE + phys_addr);
+            let virt_addr = VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE);
 
             // This physical memory page will be both writable and executable. Unfortunately
             // we can't set NX bit because we will execute some code using this mapping
