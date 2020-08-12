@@ -1,5 +1,7 @@
 #![no_std]
 
+// Everything here must be exactly the same in 32 bit mode and 64 bit mode.
+
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicU32, Ordering};

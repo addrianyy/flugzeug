@@ -14,7 +14,7 @@ enter_kernel:
     ; Load 64 bit GDT.
     lgdt [gdt_64.r]
 
-    ; Enable LME and EFER.
+    ; Enable LME and NXE.
     mov ecx, 0xc0000080
     mov eax, 0x00000900
     mov edx, 0
@@ -36,7 +36,6 @@ enter_kernel:
     xor eax, eax
     or  eax,  (1 <<  0) ; Protected mode enable
     or  eax,  (1 <<  1) ; Monitor co-processor
-    and eax, ~(1 <<  2) ; Clear Emulation flag
     or  eax,  (1 << 16) ; Write protect
     or  eax,  (1 << 31) ; Paging enable
     mov cr0, eax
@@ -54,16 +53,16 @@ enter_kernel:
     mov fs, ax
     mov gs, ax
 
-    ; We are currently using identity map. Because kernel provides only linear map, we need
-    ; to switch to it. It's as simple as adding `Physical region base` to the target instruction
-    ; address.
+    ; We are currently executing code in identity map. Because kernel provides only 
+    ; linear map, we need to switch to it. It's as simple as adding `Physical region base`
+    ; to the target instruction address.
     mov rax, qword [rsp + 0x24]
     add rax, .entry_64_next
     jmp rax
 
 .entry_64_next:
-    ; In SystemV ABI RDI is the first parameter to the function. Load boot block here so it can
-    ; be passed to the kernel.
+    ; In System-V ABI RDI is the first parameter to the function.
+    ; Load boot block to RDI so it will be passed to the kernel entrypoint.
     mov rdi, qword [rsp + 0x14]
 
     ; Get the entrypoint of the kernel.
@@ -89,7 +88,7 @@ enter_kernel:
 align 8
 gdt_64:
     dq 0x0000000000000000 ; Null segment.
-    dq 0x00209A0000000000 ; Code segment.
+    dq 0x00209a0000000000 ; Code segment.
     dq 0x0000920000000000 ; Data segment.
     .r:
         dw (.r - gdt_64) - 1

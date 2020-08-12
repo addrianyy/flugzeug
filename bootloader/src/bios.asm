@@ -184,8 +184,8 @@ gdt_16:
         dw (.r - gdt_16) - 1
         dd gdt_16
 
-; This will be filled at the begnnining of bios_interrupt. Can be written because whole
-; bootloader is mapped as RWX.
+; This will be filled at the begnnining of bios_interrupt. This memory is writable because whole
+; bootloader is mapped with RWX permissions.
 previous_gdt:
     dw 0 ; Limit.
     dd 0 ; Base.

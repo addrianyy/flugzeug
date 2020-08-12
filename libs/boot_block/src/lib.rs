@@ -12,7 +12,6 @@ pub const KERNEL_STACK_SIZE: u64 = 1024 * 1024;
 pub const KERNEL_PHYSICAL_REGION_BASE: u64 = 0xffff_cafe_0000_0000;
 pub const KERNEL_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 
-/// Size of the kernel physical window (in bytes)
 #[repr(C)]
 pub struct BootBlock {
     pub size: u64,

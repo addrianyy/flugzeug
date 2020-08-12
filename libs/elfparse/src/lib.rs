@@ -42,6 +42,10 @@ pub struct Segment<'a> {
 
 impl<'a> Elf<'a> {
     pub fn parse(bytes: &'a [u8]) -> Option<Self> {
+        if bytes.get(0x00..0x04)? != b"\x7fELF" {
+            return None;
+        }
+
         let bitness = match bytes.get(0x04)? {
             1 => Bitness::Bits32,
             2 => Bitness::Bits64,

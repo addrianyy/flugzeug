@@ -9,6 +9,8 @@ mod panic;
 mod bios;
 mod mm;
 
+use core::convert::TryInto;
+
 use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
                  KERNEL_STACK_BASE, KERNEL_STACK_SIZE};
 
@@ -17,10 +19,14 @@ use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness};
 use bios::RegisterState;
 
-use core::convert::TryInto;
-use alloc::vec::Vec;
-
 pub static BOOT_BLOCK: BootBlock = BootBlock::new();
+
+struct KernelEntryData {
+    entrypoint:     u64,
+    stack:          u64,
+    kernel_cr3:     u32,
+    trampoline_cr3: u32,
+}
 
 fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
     // Make a temporary buffer which is on the stack in low memory address.
@@ -85,21 +91,17 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
     panic!("Failed to read sector from disk at LBA {}.", lba);
 }
 
-fn read_kernel(boot_disk_data: *const BootDiskData,
-               boot_disk_descriptor: *const BootDiskDescriptor) -> Vec<u8> {
-    let (boot_disk_descriptor, boot_disk_data) = unsafe {
-        (&*boot_disk_descriptor, &*boot_disk_data)
-    };
+fn setup_kernel(boot_disk_data: &BootDiskData,
+                boot_disk_descriptor: &BootDiskDescriptor) -> KernelEntryData {
+    // Verify that BDD is valid.
+    assert!(boot_disk_descriptor.signature == bdd::SIGNATURE, "BDD has invalid signature.");
 
-    // Verify that BDD is valid and get information about kernel from it.
-
-    assert!(boot_disk_descriptor.signature == bdd::SIGNATURE, "BDD signature does not match.");
-
+    // Get information about kernel location on disk from BDD.
     let kernel_lba      = boot_disk_descriptor.kernel_lba;
     let kernel_sectors  = boot_disk_descriptor.kernel_sectors;
     let kernel_checksum = boot_disk_descriptor.kernel_checksum;
 
-    // Allocate buffer that will hold kernel ELF image.
+    // Allocate a buffer that will hold whole kernel ELF image.
     let mut kernel = alloc::vec![0; (kernel_sectors as usize) * 512];
 
     // Read the kernel.
@@ -110,17 +112,12 @@ fn read_kernel(boot_disk_data: *const BootDiskData,
         read_sector(boot_disk_data, kernel_lba + sector, buffer);
     }
 
-    // Make sure that we have actually loaded a thing that we expected.
+    // Make sure that loaded kernel matches our expectations.
     assert!(bdd::checksum(&kernel) == kernel_checksum,
             "Loaded kernel has invalid checksum.");
 
-    kernel
-}
-
-fn prepare_kernel(kernel: Vec<u8>) -> (u64, u64, u32, u32) {
     // Parse the kernel ELF file and make sure that it is 64 bit.
     let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
-
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
 
     // WARNING: We can't use any normal allocation routines from here because free memory list
@@ -128,20 +125,23 @@ fn prepare_kernel(kernel: Vec<u8>) -> (u64, u64, u32, u32) {
     let mut phys_mem = BOOT_BLOCK.free_memory.lock();
     let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
 
+    // Allocate page table that will be used by kernel.
     let mut kernel_page_table = PageTable::new(&mut phys_mem)
         .expect("Failed to allocate kernel page table.");
 
+    // Allocate page table that will be used when transitioning to the kernel.
     let mut trampoline_page_table = PageTable::new(&mut phys_mem)
         .expect("Failed to allocate trampoline page table.");
 
+    // Map kernel to the virtual memory.
     elf.for_each_segment(|segment| {
         // Skip non-loadable segments.
         if !segment.load {
             return;
         }
 
-        // Page table `map_init` function requires both address and size to be page aligned.
-        // Segments in ELF file are often unaligned.
+        // Page table `map_init` function requires both address and size to be page aligned, but
+        // segments in ELF file are often unaligned.
 
         // Align virtual address down.
         let virt_addr = VirtAddr(segment.virt_addr & !0xfff);
@@ -156,16 +156,42 @@ fn prepare_kernel(kernel: Vec<u8>) -> (u64, u64, u32, u32) {
         kernel_page_table.map_init(&mut phys_mem, virt_addr, PageType::Page4K, virt_size,
                                    segment.write, segment.execute,
                                    Some(|offset| {
+                                       // Get a byte for given segment offset. Because
+                                       // we possibly changed segment start virtual address,
+                                       // we need to account for that by adding `offset_add`
+                                       // to the actual offset.
                                        segment.bytes.get((offset + offset_add) as usize)
                                            .copied().unwrap_or(0)
                                    }))
             .expect("Failed to map kernel segment.");
     });
 
-    for phys_addr in (0..1024 * 1024).step_by(4096) {
-        unsafe {
-            for &virt_addr in &[VirtAddr(phys_addr),
-                                VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE)] {
+    // Bootloader uses identity physical memory map, but kernel will use linear physical
+    // memory map that starts at `KERNEL_PHYSICAL_REGION_BASE`.
+    // To be able to transition to the kernel we need to a allocate trampoline page table that
+    // will map physical address 0 to virtual address 0 (like in bootloader) and
+    // physical address 0 to virtual address `KERNEL_PHYSICAL_REGION_SIZE` (like in kernel).
+
+    // Transition code will work like this:
+    // 1. Bootloader executes `enter_kernel`. Enable long mode and setup paging with trampoline
+    //    page table.
+    // 2. Jump to the next part of `enter_kernel`, but add `KERNEL_PHYSICAL_REGION_BASE`
+    //    to RIP in order to use kernel-valid address.
+    // 3. Switch to the actual kernel page tables, switch stack and jump to the kernel.
+
+    // We will only execute bootloader code using trampoline page tables. Bootloader
+    // has to be loaded in a low, smaller than 1MB address. Therafore we just need to map
+    // 1MB of memory.
+    const TRAMPOLINE_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024;
+
+    // Setup trampoline page table.
+    for phys_addr in (0..TRAMPOLINE_PHYSICAL_REGION_SIZE).step_by(4096) {
+        // Map current `phys_addr` at virtual address `phys_addr` and virtual address
+        // `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`. All this memory will be both
+        // writable and executable.
+        for &virt_addr in &[VirtAddr(phys_addr),
+                            VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE)] {
+            unsafe {
                 trampoline_page_table.map_raw(&mut phys_mem, virt_addr, PageType::Page4K,
                                               phys_addr | PAGE_WRITE | PAGE_PRESENT, true, false)
                     .expect("Failed to map physical region in the trampoline page table.");
@@ -173,25 +199,34 @@ fn prepare_kernel(kernel: Vec<u8>) -> (u64, u64, u32, u32) {
         }
     }
 
+    // Create linear physical memory map used by kernel at address.
     {
+        // We will map a lot of memory, so use the largest possible page type.
+        // TODO: Don't use 1G pages blindly, check what is the largest page supported by the CPU.
         let page_type = PageType::Page1G;
         let page_size = page_type as u64;
         let page_mask = page_size - 1;
-        let large     = page_type != PageType::Page4K;
 
+        // Make sure physical region address and size are properly aligned for used page type.
         assert!(KERNEL_PHYSICAL_REGION_BASE & page_mask == 0,
                 "KERNEL_PHYSICAL_REGION_BASE is not aligned.");
-
         assert!(KERNEL_PHYSICAL_REGION_SIZE & page_mask == 0,
                 "KERNEL_PHYSICAL_REGION_SIZE is not aligned.");
 
+        // Setup kernel physical memory map.
         for phys_addr in (0..KERNEL_PHYSICAL_REGION_SIZE).step_by(page_size as usize) {
+            // Map current `phys_addr` at virtual address
+            // `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`.
             let virt_addr = VirtAddr(KERNEL_PHYSICAL_REGION_BASE + phys_addr);
 
-            // We can't set NX here because we will execute this memory in enter_kernel.
+            // This physical memory page will be both writable and executable. Unfortunately
+            // we can't set NX bit because we will execute some code using this mapping
+            // when transitioning from bootloader to the kernel. Kernel should later make these
+            // mappings NX.
             let mut raw = phys_addr | PAGE_PRESENT | PAGE_WRITE;
 
-            if large {
+            // Set PAGE_SIZE bit if we aren't using standard 4K pages.
+            if page_type != PageType::Page4K {
                 raw |= PAGE_SIZE;
             }
 
@@ -204,10 +239,12 @@ fn prepare_kernel(kernel: Vec<u8>) -> (u64, u64, u32, u32) {
 
     let stack = KERNEL_STACK_BASE;
 
+    // Map kernel stack as writable and non-executable.
     kernel_page_table.map(&mut phys_mem, VirtAddr(stack), PageType::Page4K, KERNEL_STACK_SIZE,
                           true, false)
         .expect("Failed to map kernel stack.");
 
+    // Get physical addresses of page tables and make sure they fit in 32 bit integer.
     let kernel_cr3:     u32 = kernel_page_table.table().0.try_into().unwrap();
     let trampoline_cr3: u32 = trampoline_page_table.table().0.try_into().unwrap();
 
@@ -215,33 +252,37 @@ fn prepare_kernel(kernel: Vec<u8>) -> (u64, u64, u32, u32) {
     println!("Kernel entrypoint is {:x}", elf.entrypoint());
     println!("Kernel stack base is {:x}", stack);
 
-    (elf.entrypoint(), stack + KERNEL_STACK_SIZE, kernel_cr3, trampoline_cr3)
+    KernelEntryData {
+        entrypoint: elf.entrypoint(),
+        stack:      stack + KERNEL_STACK_SIZE,
+        kernel_cr3,
+        trampoline_cr3,
+    }
 }
 
 #[no_mangle]
-extern "C" fn _start(boot_disk_data: *const BootDiskData,
-                     boot_disk_descriptor: *const BootDiskDescriptor) -> ! {
+extern "C" fn _start(boot_disk_data: &BootDiskData,
+                     boot_disk_descriptor: &BootDiskDescriptor) -> ! {
     // Initialize crucial bootloader components.
     unsafe {
         serial::initialize();
         mm::initialize();
     }
 
-    // Read the kernel from disk and prepare it for execution.
-    let kernel = read_kernel(boot_disk_data, boot_disk_descriptor);
-    let (entrypoint, stack, kernel_cr3, trampoline_cr3) = prepare_kernel(kernel);
+    // Load kernel, map it to the virtual memory and allocate stack.
+    let entry_data = setup_kernel(boot_disk_data, boot_disk_descriptor);
 
     extern "C" {
         fn enter_kernel(entrypoint: u64, stack: u64, boot_block: u64, kernel_cr3: u32,
                         trampoline_cr3: u32, physical_region: u64) -> !;
     }
 
-    // Switch to the 64 bit kernel!
-
     println!("Entering kernel!");
 
+    // Enter the 64 bit kernel!.
     unsafe {
-        enter_kernel(entrypoint, stack, &BOOT_BLOCK as *const _ as u64, kernel_cr3,
-                     trampoline_cr3, KERNEL_PHYSICAL_REGION_BASE);
+        enter_kernel(entry_data.entrypoint, entry_data.stack, &BOOT_BLOCK as *const _ as u64,
+                     entry_data.kernel_cr3, entry_data.trampoline_cr3,
+                     KERNEL_PHYSICAL_REGION_BASE);
     }
 }
