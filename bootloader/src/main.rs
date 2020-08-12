@@ -141,7 +141,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         }
 
         // Page table `map_init` function requires both address and size to be page aligned, but
-        // segments in ELF file are often unaligned.
+        // segments in ELF files are often unaligned.
 
         // Align virtual address down.
         let virt_addr = VirtAddr(segment.virt_addr & !0xfff);
