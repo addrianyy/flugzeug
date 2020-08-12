@@ -1,6 +1,10 @@
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use boot_block::BootBlock;
 use page_table::PhysAddr;
 use crate::mm;
+
+static NEXT_FREE_CORE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[macro_export]
 macro_rules! core {
@@ -23,6 +27,7 @@ pub struct CoreLocals {
     // Must be always first field in the structure.
     self_address: usize,
 
+    pub id:         u64,
     pub boot_block: &'static BootBlock,
 }
 
@@ -32,6 +37,9 @@ impl SyncGuard for CoreLocals {}
 
 pub unsafe fn initialize(boot_block: PhysAddr) {
     const IA32_GS_BASE: u32 = 0xc0000101;
+
+    // Get a unique identifier for this core.
+    let core_id = NEXT_FREE_CORE_ID.fetch_add(1, Ordering::SeqCst);
 
     assert!(boot_block.0 != 0, "Boot block is null.");
 
@@ -57,6 +65,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
 
     let core_locals = CoreLocals {
         self_address: core_locals_ptr,
+        id:           core_id,
         boot_block,
     };
 

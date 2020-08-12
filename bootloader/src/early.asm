@@ -10,12 +10,26 @@
 ; Ensure that CS == 0 and IP == 0x7C00.
 jmp 0x00:entry_16
 
+; Do not move this! These values must be at 0x7c08!
+times 8 - ($ - $$) db 0x00
+stack_available: db 1
+first_boot:      db 1
+
 ; 16 bit entry point for bootloader.
 [bits 16]
 entry_16:
     ; Disable interrupts and clear direction flag.
     cli
     cld
+
+    ; Wait for stack to become available. This will disallow two instances of bootloader
+    ; running at the same time. Bootloader is not thread safe.
+    .wait_for_stack:
+        pause
+        xor         al, al
+        lock xchg   byte [stack_available], al
+        test        al, al
+        jz          short .wait_for_stack
 
     ; Zero out used segments.
     xor     ax, ax
@@ -25,6 +39,17 @@ entry_16:
 
     ; Setup initial stack pointer just above our bootloader.
     mov     sp, 0x7c00
+
+    ; If it's not the first boot, don't load second stage bootloader from disk. It's
+    ; already there.
+    mov     al, byte [first_boot]
+    test    al, al
+    jz      already_loaded
+
+    ; This is the first time bootloader is running, not just AP launching.
+
+    ; Make sure that the next time bootloader is run we will not load all data again.
+    mov     byte [first_boot], 0
 
     ; After setting up stack interrupts can be enabled again.
     sti
@@ -64,10 +89,13 @@ entry_16:
     mul     dword [sectors_per_track]
     mov     dword [sectors_per_cylinder], eax
 
-    ; Read 1 additional sector so bootloader ends at 0x8000. Skip LBA 1 because it contains
+    ; Read 2 additional sectors so bootloader ends at 0x8200. Skip LBA 1 because it contains
     ; boot disk descriptor.
     mov     ebx, 0x7c00 + 1 * 0x200
     mov     eax, 2
+    call    read_sector
+    mov     ebx, 0x7c00 + 2 * 0x200
+    mov     eax, 3
     call    read_sector
 
     ; We are out of space so jump to newly loaded part of bootloader.
@@ -285,7 +313,7 @@ times 510 - ($ - $$) db 0x00
 dw 0xaa55
 
 %define BDD_SIGNATURE   0x1778cf9d
-%define BOOT_DISK_DESC  0x8000
+%define BOOT_DISK_DESC  0x9000
 %define BOOTLOADER_BASE 0x10000
 
 entry_16_continue:
@@ -371,6 +399,9 @@ entry_16_continue:
     cmp     ebx, [BOOT_DISK_DESC + 12]
     jne     error_16
 
+already_loaded:
+    ; Everything was loaded from disk. Enter 32 bit mode bootloader now.
+
     ; Enable A20 line.
     in      al, 0x92
     test    al, 0x02
@@ -432,9 +463,17 @@ gdt_32:
         dw (.r - gdt_32) - 1
         dd gdt_32
 
-%if ($ - $$) > 1024
-%error "Code over 1024 bytes", $
-%endif
+; Make sure that this bootloader part has 2 * 512 bytes.
+times (2 * 512) - ($ - $$) db 0xff
 
-; Make sure that this bootloader stage has 1024 bytes.
-times 1024 - ($ - $$) db 0xff
+[bits 16]
+
+; Address 0x8000. 16 bit entrypoint for APs.
+; WARNING: This address is hardcoded in kernel, so don't change it.
+; Just jump to the normal bootloader entrypoint, it will know that we are launching
+; APs and it will use existing, loaded data.
+ap_entry:
+    jmp 0x00:entry_16
+
+; Make sure that whole assembly bootloader is 3 * 512 bytes long.
+times (3 * 512) - ($ - $$) db 0xff

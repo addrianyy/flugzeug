@@ -4,7 +4,10 @@ use crate::BOOT_BLOCK;
 pub unsafe fn initialize() {
     let mut serial_port = BOOT_BLOCK.serial_port.lock();
 
-    assert!(serial_port.is_none(), "Serial port was already initialized.");
+    // Skip initialization if the serial port was already initialized by other CPU.
+    if serial_port.is_some() {
+        return;
+    }
 
     *serial_port = Some(SerialPort::new());
 }

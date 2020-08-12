@@ -5,6 +5,7 @@ name = "boot_block"
 version = "0.1.0"
 dependencies = [
  "lock",
+ "page_table",
  "rangeset",
  "serial_port",
 ]

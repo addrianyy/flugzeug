@@ -12,18 +12,33 @@ mod mm;
 use core::convert::TryInto;
 
 use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
-                 KERNEL_STACK_BASE, KERNEL_STACK_SIZE};
+                 KERNEL_STACK_BASE, KERNEL_STACK_SIZE, KERNEL_STACK_PADDING};
 
 use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE};
 use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness};
 use bios::RegisterState;
+use lock::Lock;
 
+// Bootloader is not thread safe. There can be only one instance of it running at a time.
+// Stack lock in `early.asm` makes sure that this is indeed what happens.
+
+/// Boot block is a shared data structure between kernel and bootloader. It must have
+/// exactly the same shape in 32 bit and 64 bit mode. It allows for concurrent memory
+/// allocation and modification and serial port interface.
 pub static BOOT_BLOCK: BootBlock = BootBlock::new();
 
+/// Data required to enter the kernel. If it is `None` then kernel wasn't loaded
+/// from disk yet.
+static KERNEL_ENTRY_DATA: Lock<Option<KernelEntryData>> = Lock::new(None);
+
+/// Address of the next stack used to enter the kernel. Each CPU takes address from here
+/// and advances the value. There is no 64 bit atomic value in 32 bit mode so `Lock` is used.
+static NEXT_STACK_ADDRESS: Lock<u64> = Lock::new(KERNEL_STACK_BASE);
+
+#[derive(Copy, Clone)]
 struct KernelEntryData {
     entrypoint:     u64,
-    stack:          u64,
     kernel_cr3:     u32,
     trampoline_cr3: u32,
 }
@@ -91,8 +106,44 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
     panic!("Failed to read sector from disk at LBA {}.", lba);
 }
 
+/// Creates a unique kernel stack required for entering the kernel.
+fn create_kernel_stack() -> u64 {
+    let mut phys_mem = BOOT_BLOCK.free_memory.lock();
+    let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
+
+    let mut page_table = BOOT_BLOCK.page_table.lock();
+    let page_table     = page_table.as_mut().unwrap();
+
+    let mut next_stack_address = NEXT_STACK_ADDRESS.lock();
+
+    // Get unique stack address.
+    let stack = *next_stack_address;
+
+    // Map the stack to kernel's address space.
+    page_table.map(&mut phys_mem, VirtAddr(stack), PageType::Page4K, KERNEL_STACK_SIZE,
+                   true, false)
+        .expect("Failed to map kernel stack.");
+
+    // Update stack address used by the next AP.
+    *next_stack_address += KERNEL_STACK_SIZE + KERNEL_STACK_PADDING;
+
+    stack
+}
+
+/// Allocates a unique stack and gets all data required to enter the kernel.
+/// If kernel isn't already in memory, it will be read from disk and mapped.
 fn setup_kernel(boot_disk_data: &BootDiskData,
-                boot_disk_descriptor: &BootDiskDescriptor) -> KernelEntryData {
+                boot_disk_descriptor: &BootDiskDescriptor) -> (KernelEntryData, u64) {
+    if let Some(entry_data) = *KERNEL_ENTRY_DATA.lock() {
+        // We are currently launching AP and the kernel has been already loaded and mapped.
+        // We just need a new stack to enter the kernel.
+
+        // Create a unique stack for this core.
+        let rsp = create_kernel_stack() + KERNEL_STACK_SIZE;
+
+        return (entry_data, rsp);
+    }
+
     // Make sure that the BDD is valid.
     assert!(boot_disk_descriptor.signature == bdd::SIGNATURE, "BDD has invalid signature.");
 
@@ -121,8 +172,9 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
 
     // WARNING: We can't use any normal allocation routines from here because free memory list
     // is locked and we would cause a deadlock.
-    let mut phys_mem = BOOT_BLOCK.free_memory.lock();
-    let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
+    // It is possible that kernel uses this memory list too. This is fine as everything is locked.
+    let mut free_mem = BOOT_BLOCK.free_memory.lock();
+    let mut phys_mem = mm::PhysicalMemory(free_mem.as_mut().unwrap());
 
     // Allocate page table that will be used by the kernel.
     let mut kernel_page_table = PageTable::new(&mut phys_mem)
@@ -248,27 +300,33 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         }
     }
 
-    let stack = KERNEL_STACK_BASE;
-
-    // Map kernel stack as writable and non-executable.
-    kernel_page_table.map(&mut phys_mem, VirtAddr(stack), PageType::Page4K, KERNEL_STACK_SIZE,
-                          true, false)
-        .expect("Failed to map kernel stack.");
+    // Release the locks.
+    drop(phys_mem);
+    drop(free_mem);
 
     // Get physical addresses of page tables and make sure they fit in 32 bit integer.
     let kernel_cr3:     u32 = kernel_page_table.table().0.try_into().unwrap();
     let trampoline_cr3: u32 = trampoline_page_table.table().0.try_into().unwrap();
 
+    // Cache page tables which will be used by all APs.
+    *BOOT_BLOCK.page_table.lock() = Some(kernel_page_table);
+
     println!("Kernel base is {:x}", elf.base_address());
     println!("Kernel entrypoint is {:x}", elf.entrypoint());
-    println!("Kernel stack base is {:x}", stack);
 
-    KernelEntryData {
+    let entry_data = KernelEntryData {
         entrypoint: elf.entrypoint(),
-        stack:      stack + KERNEL_STACK_SIZE,
         kernel_cr3,
         trampoline_cr3,
-    }
+    };
+
+    // Cache entry data so APs can use them later to enter the kernel.
+    *KERNEL_ENTRY_DATA.lock() = Some(entry_data);
+
+    // Create a unique stack for this core.
+    let rsp = create_kernel_stack() + KERNEL_STACK_SIZE;
+
+    (entry_data, rsp)
 }
 
 #[no_mangle]
@@ -278,25 +336,24 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
     assert!(core::mem::size_of::<u64>() == 8 && core::mem::align_of::<u64>() == 8,
             "U64 has invalid size/alignment.");
 
-    // Initialize crucial bootloader components.
+    // Initialize crucial bootloader components. This won't do anything if they
+    // were already initialized by other CPU.
     unsafe {
         serial::initialize();
         mm::initialize();
     }
 
-    // Load kernel, map it to the virtual memory and allocate stack.
-    let entry_data = setup_kernel(boot_disk_data, boot_disk_descriptor);
+    // Load and map kernel if required. Also allocate a unique stack for this core.
+    let (entry_data, rsp) = setup_kernel(boot_disk_data, boot_disk_descriptor);
 
     extern "C" {
-        fn enter_kernel(entrypoint: u64, stack: u64, boot_block: u64, kernel_cr3: u32,
+        fn enter_kernel(entrypoint: u64, rsp: u64, boot_block: u64, kernel_cr3: u32,
                         trampoline_cr3: u32, physical_region: u64) -> !;
     }
 
-    println!("Entering kernel!");
-
     // Enter the 64 bit kernel!
     unsafe {
-        enter_kernel(entry_data.entrypoint, entry_data.stack, &BOOT_BLOCK as *const _ as u64,
+        enter_kernel(entry_data.entrypoint, rsp, &BOOT_BLOCK as *const _ as u64,
                      entry_data.kernel_cr3, entry_data.trampoline_cr3,
                      KERNEL_PHYSICAL_REGION_BASE);
     }

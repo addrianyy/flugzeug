@@ -61,7 +61,10 @@ pub unsafe fn initialize() {
     let mut free_memory = BOOT_BLOCK.free_memory.lock();
     let mut memory      = RangeSet::new();
 
-    assert!(free_memory.is_none(), "Bootloader memory manager was already initialized.");
+    // Skip initialization if the memory manager was already initialized by other CPU.
+    if free_memory.is_some() {
+        return;
+    }
 
     // Do two passes because some BIOSes are broken.
     for &cleanup_pass in &[false, true] {

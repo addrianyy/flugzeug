@@ -6,7 +6,7 @@ use elfparse::{Elf, Bitness};
 use bdd::BootDiskDescriptor;
 
 // Don't change. Hardcoded in bootloader assembly file.
-const MAX_EARLY_BOOTLOADER_SIZE: usize = 1024;
+const MAX_EARLY_BOOTLOADER_SIZE: usize = 3 * 512;
 const MAX_BOOTLOADER_SIZE:       usize = 400 * 1024;
 const BDD_SIZE:                  usize = 512;
 const BOOTLOADER_BASE:           u64   = 0x10000;

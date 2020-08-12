@@ -6,5 +6,6 @@ edition = "2018"
 
 [dependencies]
 serial_port = { path = "../serial_port" }
+page_table = { path = "../page_table" }
 rangeset = { path = "../rangeset" }
 lock = { path = "../lock" }
