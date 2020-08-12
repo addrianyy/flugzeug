@@ -21,7 +21,7 @@ fn build(command: &str, directory: Option<&Path>, args: &[&str], fail_message: &
     let status = to_run
         .args(args)
         .status()
-        .expect(&format!("Invoking `{}` failed.", command));
+        .unwrap_or_else(|_| panic!("Invoking `{}` failed.", command));
 
     if !status.success() {
         println!("{}", fail_message);

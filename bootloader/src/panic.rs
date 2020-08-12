@@ -12,14 +12,14 @@ fn panic(panic_info: &PanicInfo) -> ! {
     // port. This is broken if there are concurrent users of serial port.
     let mut serial_port = unsafe { SerialPort::new() };
 
-    let _ = write!(serial_port, "Bootloader panic.\n");
+    let _ = writeln!(serial_port, "Bootloader panic.");
 
     if let Some(message) = panic_info.message() {
-        let _ = write!(serial_port, "message: {}\n", message);
+        let _ = writeln!(serial_port, "message: {}", message);
     }
 
     if let Some(location) = panic_info.location() {
-        let _ = write!(serial_port, "location: {}:{}\n", location.file(), location.line());
+        let _ = writeln!(serial_port, "location: {}:{}", location.file(), location.line());
     }
 
     cpu::halt();
