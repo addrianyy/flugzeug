@@ -1,5 +1,6 @@
-use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE};
+use boot_block::BootBlock;
 use page_table::PhysAddr;
+use crate::mm;
 
 #[macro_export]
 macro_rules! core {
@@ -34,8 +35,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
 
     assert!(boot_block.0 != 0, "Boot block is null.");
 
-    // Convert boot block physical address to virtual address.
-    let boot_block = &*((KERNEL_PHYSICAL_REGION_BASE + boot_block.0) as *const BootBlock);
+    let boot_block = mm::phys_ref::<BootBlock>(boot_block).unwrap();
 
     // Make sure that structure size is the same in 32 bit and 64 bit mode.
     assert!(boot_block.size == core::mem::size_of::<BootBlock>() as u64,
@@ -50,10 +50,9 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
         let core_locals_phys = free_memory.allocate(
             core::mem::size_of::<CoreLocals>()  as u64,
             core::mem::align_of::<CoreLocals>() as u64,
-        ).expect("Failed to allocate core locals.");
+        ).expect("Failed to allocate core locals.") as u64;
 
-        // Convert core locals physical address to virtual address.
-        (KERNEL_PHYSICAL_REGION_BASE as usize) + core_locals_phys
+        mm::phys_ref::<CoreLocals>(PhysAddr(core_locals_phys)).unwrap() as *const _ as usize
     };
 
     let core_locals = CoreLocals {
@@ -62,5 +61,6 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
     };
 
     core::ptr::write(core_locals_ptr as *mut CoreLocals, core_locals);
+
     cpu::wrmsr(IA32_GS_BASE, core_locals_ptr as u64);
 }

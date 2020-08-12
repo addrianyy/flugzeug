@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(panic_info_message, alloc_error_handler, asm)]
 
+mod mm;
 mod panic;
 #[macro_use] mod serial;
 #[macro_use] mod core_locals;
