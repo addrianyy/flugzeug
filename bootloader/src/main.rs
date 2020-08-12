@@ -145,10 +145,12 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         // Align virtual address down.
         let virt_addr = VirtAddr(segment.virt_addr & !0xfff);
 
-        // Align virtual size up.
-        let virt_size = (segment.virt_size + 0xfff) & !0xfff;
-
+        // Calculate the number of bytes we have added in front of segment to satisfy alignemnt
+        // requirements.
         let front_padding = segment.virt_addr - virt_addr.0;
+
+        // Align virtual size up (accounting for front padding).
+        let virt_size = (segment.virt_size + front_padding + 0xfff) & !0xfff;
 
         // Map the segment with correct permissions using standard 4K pages.
         // If some segments overlap, this routine will return an error.
@@ -270,6 +272,10 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
 #[no_mangle]
 extern "C" fn _start(boot_disk_data: &BootDiskData,
                      boot_disk_descriptor: &BootDiskDescriptor) -> ! {
+    // Make sure that LLVM data layout isn't broken.
+    assert!(core::mem::size_of::<u64>() == 8 && core::mem::align_of::<u64>() == 8,
+            "U64 has invalid size/alignment.");
+
     // Initialize crucial bootloader components.
     unsafe {
         serial::initialize();
@@ -286,7 +292,7 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
 
     println!("Entering kernel!");
 
-    // Enter the 64 bit kernel!.
+    // Enter the 64 bit kernel!
     unsafe {
         enter_kernel(entry_data.entrypoint, entry_data.stack, &BOOT_BLOCK as *const _ as u64,
                      entry_data.kernel_cr3, entry_data.trampoline_cr3,

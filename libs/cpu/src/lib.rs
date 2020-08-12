@@ -37,6 +37,23 @@ pub unsafe fn invlpg(addr: usize) {
     asm!("invlpg [{}]", in(reg) addr);
 }
 
+pub unsafe fn rdmsr(msr: u32) -> u64 {
+    let low:  u32;
+    let high: u32;
+
+    asm!("rdmsr", out("edx") high, out("eax") low, in("ecx") msr);
+
+    low as u64 | (high as u64) << 32
+}
+
+
+pub unsafe fn wrmsr(msr: u32, value: u64) {
+    let low:  u32 = value as u32;
+    let high: u32 = (value >> 32) as u32;
+
+    asm!("wrmsr", in("edx") high, in("eax") low, in("ecx") msr);
+}
+
 pub fn halt() -> ! {
     loop {
         unsafe {

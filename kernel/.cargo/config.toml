@@ -2,7 +2,7 @@
 target = "x86_64-unknown-none.json"
 
 rustflags = [
-    "-C", "link-args=-image-base=0x1400000000",
+    "-C", "link-args=-image-base=0x1400000",
     "-C", "relocation-model=static",
 ]
 
