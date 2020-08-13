@@ -18,6 +18,17 @@ pub struct PhysAddr(pub u64);
 #[repr(C)]
 pub struct VirtAddr(pub u64);
 
+impl VirtAddr {
+    pub fn is_canonical(&self) -> bool {
+        let mut addr = self.0 as i64;
+
+        addr <<= 12;
+        addr >>= 12;
+
+        addr as u64 == self.0
+    }
+}
+
 pub trait PhysMem {
     unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8>;
 
@@ -155,6 +166,10 @@ impl PageTable {
     ) -> Option<()> {
         const U64_SIZE: u64 = core::mem::size_of::<u64>() as u64;
 
+        if !virt_addr.is_canonical() {
+            return None;
+        }
+
         let page_size = page_type as u64;
         let page_mask = page_size - 1;
 
@@ -201,23 +216,28 @@ impl PageTable {
 
             let entry = *entry_ptr;
 
-            // If it's not the the last lavel entry and it's non-present then we can
-            // allocate it and continue traversing
-            if depth != indices.len() - 1 && entry & PAGE_PRESENT == 0 {
-                // Check if we are allowed to create new entries.
-                if !add {
+            if depth != indices.len() - 1 {
+                if entry & PAGE_PRESENT == 0 {
+                    // If it's not the the last lavel entry and it's non-present then we can
+                    // allocate it and continue traversing
+
+                    // Check if we are allowed to create new entries.
+                    if !add {
+                        return None;
+                    }
+
+                    let new_table = phys_mem.alloc_phys_zeroed(
+                        Layout::from_size_align(4096, 4096).ok()?)?;
+
+                    // Create new entry with max permissions and mark it as present.
+                    *entry_ptr = new_table.0 | PAGE_PRESENT | PAGE_USER | PAGE_WRITE;
+                } else if entry & PAGE_SIZE != 0 {
+                    // Mapped page is different than what was specified in `page_type`.
                     return None;
                 }
+            } else {
+                // We are at the final level of page table.
 
-                let new_table = phys_mem.alloc_phys_zeroed(
-                    Layout::from_size_align(4096, 4096).ok()?)?;
-
-                // Create new entry with max permissions and mark it as present.
-                *entry_ptr = new_table.0 | PAGE_PRESENT | PAGE_USER | PAGE_WRITE;
-            }
-
-            // Check if we are at the final level.
-            if depth == indices.len() - 1 {
                 // `update` needs to be set if we are going to change already present entry.
                 if entry & PAGE_PRESENT == 0 || update {
                     *entry_ptr = raw;
