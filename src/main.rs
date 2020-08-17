@@ -49,11 +49,7 @@ fn prepare_bootloader_binary(binary: Vec<u8>) -> (Vec<u8>, u32) {
         }
     }
 
-    elf.for_each_segment(|segment| {
-        if !segment.load {
-            return;
-        }
-
+    elf.loadable_segments(|segment| {
         let virt_offset = (segment.virt_addr - elf.base_address()) as usize;
         let virt_size   = segment.virt_size as usize;
 

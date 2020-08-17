@@ -34,7 +34,6 @@ pub struct Segment<'a> {
     pub bytes:     &'a [u8],
     pub virt_addr: u64,
     pub virt_size: u64,
-    pub load:      bool,
     pub read:      bool,
     pub write:     bool,
     pub execute:   bool,
@@ -83,15 +82,13 @@ impl<'a> Elf<'a> {
 
         let mut base_address = None;
 
-        elf.for_each_segment(|segment| {
-            if segment.load {
-                let new_base = match base_address {
-                    Some(base) => core::cmp::min(base, segment.virt_addr),
-                    None       => segment.virt_addr,
-                };
+        elf.loadable_segments(|segment| {
+            let new_base = match base_address {
+                Some(base) => core::cmp::min(base, segment.virt_addr),
+                None       => segment.virt_addr,
+            };
 
-                base_address = Some(new_base);
-            }
+            base_address = Some(new_base);
         })?;
 
         elf.base_address = base_address?;
@@ -99,7 +96,7 @@ impl<'a> Elf<'a> {
         Some(elf)
     }
 
-    pub fn for_each_segment(&self, mut callback: impl FnMut(&Segment)) -> Option<()> {
+    pub fn loadable_segments(&self, mut callback: impl FnMut(&Segment)) -> Option<()> {
         for segment in 0..self.segment_count {
             let entry = segment * self.table_entry_size + self.segment_table;
 
@@ -111,8 +108,7 @@ impl<'a> Elf<'a> {
                     let virt_size  = read!(self.bytes, entry + 0x14, u32);
                     let raw_offset = read!(self.bytes, entry + 0x04, u32);
                     let raw_size   = read!(self.bytes, entry + 0x10, u32);
-
-                    let flags = read!(self.bytes, entry + 0x18, u32);
+                    let flags      = read!(self.bytes, entry + 0x18, u32);
 
                     (virt_addr as u64, virt_size as u64, raw_offset as u64, raw_size as u64, flags)
                 }
@@ -121,14 +117,17 @@ impl<'a> Elf<'a> {
                     let virt_size  = read!(self.bytes, entry + 0x28, u64);
                     let raw_offset = read!(self.bytes, entry + 0x08, u64);
                     let raw_size   = read!(self.bytes, entry + 0x20, u64);
-
-                    let flags = read!(self.bytes, entry + 0x04, u32);
+                    let flags      = read!(self.bytes, entry + 0x04, u32);
 
                     (virt_addr, virt_size, raw_offset, raw_size, flags)
                 }
             };
 
-            let load    = segment_type == 1;
+            let load = segment_type == 1;
+            if !load {
+                continue;
+            }
+
             let execute = flags & 1 != 0;
             let write   = flags & 2 != 0;
             let read    = flags & 4 != 0;
@@ -137,7 +136,6 @@ impl<'a> Elf<'a> {
             let end:   usize = start.checked_add(raw_size.try_into().ok()?)?;
 
             let segment = Segment {
-                load,
                 read,
                 write,
                 execute,
@@ -181,11 +179,7 @@ mod tests {
         println!("Base address: {:x}.", elf.base_address());
         println!("Entrypoint:   {:x}.", elf.entrypoint());
 
-        elf.for_each_segment(|segment| {
-            if !segment.load {
-                return;
-            }
-
+        elf.loadable_segments(|segment| {
             let mut r = '-';
             let mut w = '-';
             let mut x = '-';

@@ -116,18 +116,17 @@ fn create_kernel_stack() -> u64 {
 
     let mut next_stack_address = NEXT_STACK_ADDRESS.lock();
 
-    // Get unique stack address.
-    let stack = *next_stack_address;
+    // Get a unique stack address.
+    let stack = VirtAddr(*next_stack_address);
 
-    // Map the stack to kernel's address space.
-    page_table.map(&mut phys_mem, VirtAddr(stack), PageType::Page4K, KERNEL_STACK_SIZE,
-                   true, false)
+    // Map the stack to the kernel address space.
+    page_table.map(&mut phys_mem, stack, PageType::Page4K, KERNEL_STACK_SIZE, true, false)
         .expect("Failed to map kernel stack.");
 
-    // Update stack address used by the next AP.
+    // Update stack address which will be used by the next AP.
     *next_stack_address += KERNEL_STACK_SIZE + KERNEL_STACK_PADDING;
 
-    stack
+    stack.0
 }
 
 /// Allocates a unique stack and gets all data required to enter the kernel.
@@ -185,12 +184,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         .expect("Failed to allocate trampoline page table.");
 
     // Map kernel to the virtual memory.
-    elf.for_each_segment(|segment| {
-        // Skip non-loadable segments.
-        if !segment.load {
-            return;
-        }
-
+    elf.loadable_segments(|segment| {
         // Page table `map_init` function requires both address and size to be page aligned, but
         // segments in ELF files are often unaligned.
 
