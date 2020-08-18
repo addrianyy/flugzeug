@@ -1,8 +1,10 @@
 use core::sync::atomic::{AtomicU64, Ordering};
+use core::alloc::Layout;
 
+use crate::mm::{self, FreeList};
 use boot_block::BootBlock;
 use page_table::PhysAddr;
-use crate::mm;
+use lock::Lock;
 
 static NEXT_FREE_CORE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -24,11 +26,40 @@ pub fn get_core_locals() -> &'static CoreLocals {
 
 #[repr(C)]
 pub struct CoreLocals {
-    // Must be always first field in the structure.
+    /// Must be always the first field in the structure.
     self_address: usize,
 
-    pub id:         u64,
+    /// Unique identifier for this CPU. 0 is BSP.
+    pub id: u64,
+
+    /// Data shared between bootloader and kernel.
     pub boot_block: &'static BootBlock,
+
+    /// Free lists for each power-of-two size.
+    /// The free list size is `(1 << (index + 3))`.
+    free_lists: [Lock<FreeList>; 61],
+}
+
+impl CoreLocals {
+    pub unsafe fn free_list(&self, layout: Layout) -> &Lock<FreeList> {
+        // Free lists start at 8 bytes, round it up if needed.
+        let size = core::cmp::max(layout.size(), 8);
+
+        // Round up size to the nearest power of two and get the log2 of it
+        // to determine the index into the free lists.
+        let index = 64 - (size - 1).leading_zeros();
+
+        // Compute the alignment of the free list associated with this memory.
+        // Free lists are naturally aligned until 4096 byte sizes, at which
+        // point they remain only 4096 byte aligned.
+        let free_list_align = 1 << core::cmp::min(index, 12);
+
+        assert!(free_list_align >= layout.align(),
+            "Cannot satisfy alignment requirement from the free list.");
+
+        // Get the free list corresponding to this size.
+        &self.free_lists[index as usize - 3]
+    }
 }
 
 // Make sure that `CoreLocals` is Sync.
@@ -67,6 +98,69 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
         self_address: core_locals_ptr,
         id:           core_id,
         boot_block,
+        free_lists: [
+            Lock::new(FreeList::new(0x0000000000000008)),
+            Lock::new(FreeList::new(0x0000000000000010)),
+            Lock::new(FreeList::new(0x0000000000000020)),
+            Lock::new(FreeList::new(0x0000000000000040)),
+            Lock::new(FreeList::new(0x0000000000000080)),
+            Lock::new(FreeList::new(0x0000000000000100)),
+            Lock::new(FreeList::new(0x0000000000000200)),
+            Lock::new(FreeList::new(0x0000000000000400)),
+            Lock::new(FreeList::new(0x0000000000000800)),
+            Lock::new(FreeList::new(0x0000000000001000)),
+            Lock::new(FreeList::new(0x0000000000002000)),
+            Lock::new(FreeList::new(0x0000000000004000)),
+            Lock::new(FreeList::new(0x0000000000008000)),
+            Lock::new(FreeList::new(0x0000000000010000)),
+            Lock::new(FreeList::new(0x0000000000020000)),
+            Lock::new(FreeList::new(0x0000000000040000)),
+            Lock::new(FreeList::new(0x0000000000080000)),
+            Lock::new(FreeList::new(0x0000000000100000)),
+            Lock::new(FreeList::new(0x0000000000200000)),
+            Lock::new(FreeList::new(0x0000000000400000)),
+            Lock::new(FreeList::new(0x0000000000800000)),
+            Lock::new(FreeList::new(0x0000000001000000)),
+            Lock::new(FreeList::new(0x0000000002000000)),
+            Lock::new(FreeList::new(0x0000000004000000)),
+            Lock::new(FreeList::new(0x0000000008000000)),
+            Lock::new(FreeList::new(0x0000000010000000)),
+            Lock::new(FreeList::new(0x0000000020000000)),
+            Lock::new(FreeList::new(0x0000000040000000)),
+            Lock::new(FreeList::new(0x0000000080000000)),
+            Lock::new(FreeList::new(0x0000000100000000)),
+            Lock::new(FreeList::new(0x0000000200000000)),
+            Lock::new(FreeList::new(0x0000000400000000)),
+            Lock::new(FreeList::new(0x0000000800000000)),
+            Lock::new(FreeList::new(0x0000001000000000)),
+            Lock::new(FreeList::new(0x0000002000000000)),
+            Lock::new(FreeList::new(0x0000004000000000)),
+            Lock::new(FreeList::new(0x0000008000000000)),
+            Lock::new(FreeList::new(0x0000010000000000)),
+            Lock::new(FreeList::new(0x0000020000000000)),
+            Lock::new(FreeList::new(0x0000040000000000)),
+            Lock::new(FreeList::new(0x0000080000000000)),
+            Lock::new(FreeList::new(0x0000100000000000)),
+            Lock::new(FreeList::new(0x0000200000000000)),
+            Lock::new(FreeList::new(0x0000400000000000)),
+            Lock::new(FreeList::new(0x0000800000000000)),
+            Lock::new(FreeList::new(0x0001000000000000)),
+            Lock::new(FreeList::new(0x0002000000000000)),
+            Lock::new(FreeList::new(0x0004000000000000)),
+            Lock::new(FreeList::new(0x0008000000000000)),
+            Lock::new(FreeList::new(0x0010000000000000)),
+            Lock::new(FreeList::new(0x0020000000000000)),
+            Lock::new(FreeList::new(0x0040000000000000)),
+            Lock::new(FreeList::new(0x0080000000000000)),
+            Lock::new(FreeList::new(0x0100000000000000)),
+            Lock::new(FreeList::new(0x0200000000000000)),
+            Lock::new(FreeList::new(0x0400000000000000)),
+            Lock::new(FreeList::new(0x0800000000000000)),
+            Lock::new(FreeList::new(0x1000000000000000)),
+            Lock::new(FreeList::new(0x2000000000000000)),
+            Lock::new(FreeList::new(0x4000000000000000)),
+            Lock::new(FreeList::new(0x8000000000000000)),
+        ],
     };
 
     core::ptr::write(core_locals_ptr as *mut CoreLocals, core_locals);

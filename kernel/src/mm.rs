@@ -1,5 +1,25 @@
-use page_table::PhysAddr;
-use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE};
+use core::alloc::{GlobalAlloc, Layout};
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use page_table::{VirtAddr, PhysAddr, PhysMem, PageType};
+use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
+                 KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING};
+
+pub struct PhysicalMemory;
+
+impl PhysMem for PhysicalMemory {
+    unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
+        translate(phys_addr, size)
+    }
+
+    fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
+        let mut free_memory = core!().boot_block.free_memory.lock();
+        let free_memory     = free_memory.as_mut().unwrap();
+
+        free_memory.allocate(layout.size() as u64, layout.align() as u64)
+            .map(|addr| PhysAddr(addr as u64))
+    }
+}
 
 pub unsafe fn translate(phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
     // Calculate end of region and make sure it doesn't overflow.
@@ -25,4 +45,227 @@ pub unsafe fn phys_ref<T>(phys_addr: PhysAddr) -> Option<&'static T> {
     let virt_addr = translate(phys_addr, core::mem::size_of::<T>())?;
 
     Some(&*(virt_addr as *const T))
+}
+
+/// Address of the next free virtual address in the kernel heap.
+static NEXT_HEAP_ADDRESS: AtomicU64 = AtomicU64::new(KERNEL_HEAP_BASE);
+
+pub fn reserve_virt_addr(size: usize) -> VirtAddr {
+    // Make sure that the requested size is valid.
+    assert!(size > 0 && size % 4096 == 0, "Size to reserve is invalid.");
+
+    // Calculate actual size for the region we are reserving.
+    let reserve = KERNEL_HEAP_PADDING + size as u64;
+
+    // Reserve the region.
+    let address = NEXT_HEAP_ADDRESS.fetch_add(reserve, Ordering::SeqCst);
+
+    // Make sure that we haven't overflowed the heap region.
+    address.checked_add(reserve).expect("Heap virtual address overflowed.");
+
+    VirtAddr(address)
+}
+
+/// Amount of memory used by the stack metadata in `FreeListNode`.
+const STACK_HEADER_SIZE: usize = core::mem::size_of::<usize>() * 2;
+
+#[repr(C)]
+struct FreeListNode {
+    /// Address of the next `FreeListNode`. 0 if this is the last entry.
+    next: usize,
+
+    /// Number of free slots available on the stack. This is only valid if owning free list
+    /// uses stack. If it's valid, slots are placed just after end of this structure.
+    free_slots: usize,
+}
+
+pub struct FreeList {
+    /// Pointer to `FreeListNode`. 0 if this free list is empty.
+    head: usize,
+
+    /// Allocation size for this free list. Must be >= pointer size and must be power of two.
+    size: usize,
+}
+
+impl FreeList {
+    fn use_stack(&self) -> bool {
+        // If allocation size is less than STACK_HEADER_SIZE we won't be able to store required
+        // metadata. If allocation size is equal to STACK_HEADER_SIZE we won't get any benefit
+        // from using stack. In these cases just use simple linked list.
+        // `self.size` is power of two, so the number of bytes left is always divisible
+        // by the pointer size.
+        self.size > STACK_HEADER_SIZE
+    }
+
+    fn slot_ptr(&mut self, node: *mut FreeListNode, slot: usize) -> *mut usize {
+        let node_size = core::mem::size_of::<FreeListNode>();
+
+        // Make sure that constant size matches structure size.
+        assert!(node_size == STACK_HEADER_SIZE, "Unexpected free list node size.");
+
+        // Make sure that we can actually use stack in this list.
+        assert!(self.use_stack(), "Stack cannot be used for this free page list.");
+
+        // Calculate pointer address to the slot. Slot list starts at the end of the node
+        // structure. Each slot has a pointer size.
+        (node as usize + node_size + slot * core::mem::size_of::<usize>()) as *mut usize
+    }
+
+    fn max_slots(&self) -> usize {
+        // Make sure that we can actually use stack in this list.
+        assert!(self.use_stack(), "Stack cannot be used for this free page list.");
+
+        // Calculate the number of slots that are available in this list.
+        // Each slot has a pointer size and we need to subtract the metadata size.
+        // `self.size` is power of two, so the number of bytes left is always divisible
+        // by the pointer size.
+        (self.size - STACK_HEADER_SIZE) / core::mem::size_of::<usize>()
+    }
+
+    pub fn new(size: usize) -> Self {
+        // Make sure that this free list size is valid.
+        assert!(size.count_ones() == 1, "Free list size must be a power of two.");
+        assert!(size >= core::mem::size_of::<usize>(),
+                "Free list size must be >= pointer size.");
+
+        Self {
+            head: 0,
+            size,
+        }
+    }
+
+    /// Put an allocation back to the free memory list.
+    pub unsafe fn push(&mut self, virt_addr: *mut u8) {
+        if self.use_stack() {
+            // We are using a linked list where each node has a stack of free addresses.
+
+            let head_node = self.head as *mut FreeListNode;
+
+            if head_node.is_null() || (*head_node).free_slots == 0 {
+                // Either head node is null or head node doesn't have any slots left.
+                // We need to create a new node.
+
+                let node = virt_addr as *mut FreeListNode;
+
+                // New nodes start with all slots empty.
+                (*node).free_slots = self.max_slots();
+
+                // Insert this node at the beginning of the list.
+                (*node).next = self.head;
+
+                self.head = node as usize;
+            } else {
+                // Head node has enough space to store another virtual address on the stack.
+
+                // Allocate a new slot.
+                (*head_node).free_slots -= 1;
+
+                // Store the virtual address in the newly allocated slot.
+                *self.slot_ptr(head_node, (*head_node).free_slots) = virt_addr as usize;
+            }
+        } else {
+            // We are using a simple linked list, just insert current virtual address at
+            // the beginning of the list.
+
+            let node = virt_addr as *mut FreeListNode;
+
+            (*node).next = self.head;
+
+            self.head = node as usize;
+        }
+    }
+
+    /// Get an allocation from the free memory list.
+    pub unsafe fn pop(&mut self) -> *mut u8 {
+        if self.head == 0 {
+            // This list is empty, we need to populate it with some memory.
+
+            // Always allocate at least 1 page. `actual_size` will always be page aligned.
+            let actual_size = if self.size < 4096 {
+                4096
+            } else {
+                self.size
+            };
+
+            // Reserve virtual region.
+            let virt_addr = reserve_virt_addr(actual_size);
+
+            let mut page_table = core!().boot_block.page_table.lock();
+            let page_table     = page_table.as_mut().unwrap();
+
+            // Map new memory region as readable and writable.
+            page_table.map(&mut PhysicalMemory, virt_addr, PageType::Page4K,
+                           actual_size as u64, true, false)
+                .expect("Failed to map heap memory.");
+
+            if actual_size != self.size {
+                // We have overallocated memory and we need to add all regions to the free list,
+                // not only one.
+
+                // This should never happen.
+                assert!(actual_size % self.size == 0,
+                        "Allocated size is not divisible by requested size.");
+
+                // Go through every region and add it to the free list,
+                for offset in (0..actual_size).step_by(self.size) {
+                    self.push((virt_addr.0 as usize + offset) as *mut u8)
+                }
+            } else {
+                // We have allocated exactly as much memory as requested, we can just
+                // return this address.
+                return virt_addr.0 as *mut u8;
+            }
+        }
+
+        assert!(self.head != 0, "Head cannot be empty at this point.");
+
+        let head_node = self.head as *mut FreeListNode;
+
+        if self.use_stack() {
+            // We are using a linked list where each node has a stack of free addresses.
+
+            if (*head_node).free_slots == self.max_slots() {
+                // Address stack is empty, take the entire node and use is for the allocation.
+
+                // Pop the head node from the list.
+                self.head = (*head_node).next;
+
+                head_node as *mut u8
+            } else {
+                // Take the first free virtual address from the stack.
+                let virt_addr = *self.slot_ptr(head_node, (*head_node).free_slots);
+
+                // Update the number of free slots.
+                (*head_node).free_slots += 1;
+
+                virt_addr as *mut u8
+            }
+        } else {
+            // We are using a simple linked list, just pop the head node from the list.
+
+            self.head = (*head_node).next;
+
+            head_node as *mut u8
+        }
+    }
+}
+
+pub struct GlobalAllocator;
+
+unsafe impl GlobalAlloc for GlobalAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        core!().free_list(layout).lock().pop()
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        core!().free_list(layout).lock().push(ptr)
+    }
+}
+
+#[global_allocator]
+static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
+
+#[alloc_error_handler]
+fn alloc_error_handler(layout: Layout) -> ! {
+    panic!("Allocation of memory with layout {:?} failed!", layout);
 }

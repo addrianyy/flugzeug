@@ -108,11 +108,11 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
 
 /// Creates a unique kernel stack required for entering the kernel.
 fn create_kernel_stack() -> u64 {
-    let mut phys_mem = BOOT_BLOCK.free_memory.lock();
-    let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
-
     let mut page_table = BOOT_BLOCK.page_table.lock();
     let page_table     = page_table.as_mut().unwrap();
+
+    let mut phys_mem = BOOT_BLOCK.free_memory.lock();
+    let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
 
     let mut next_stack_address = NEXT_STACK_ADDRESS.lock();
 

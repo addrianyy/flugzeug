@@ -2,10 +2,12 @@
 #![no_main]
 #![feature(panic_info_message, alloc_error_handler, asm)]
 
+extern crate alloc;
+
+#[macro_use] mod core_locals;
+#[macro_use] mod serial;
 mod mm;
 mod panic;
-#[macro_use] mod serial;
-#[macro_use] mod core_locals;
 
 use page_table::PhysAddr;
 
@@ -65,6 +67,23 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     }
 
     println!("Hello from kernel! Core ID: {}.", core!().id);
+
+    if core!().id == 0 {
+        let x = alloc::vec![0u8; 512];
+        println!("{:p}", x.as_ptr());
+
+        let y = alloc::vec![0u8; 512];
+        println!("{:p}", y.as_ptr());
+
+        drop(x);
+        drop(y);
+
+        let x = alloc::vec![0u8; 512];
+        println!("{:p}", x.as_ptr());
+
+        let y = alloc::vec![0u8; 512];
+        println!("{:p}", y.as_ptr());
+    }
 
     cpu::halt();
 }

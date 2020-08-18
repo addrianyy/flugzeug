@@ -14,6 +14,9 @@ pub const KERNEL_STACK_PADDING: u64 = 64 * 1024 * 1024;
 pub const KERNEL_PHYSICAL_REGION_BASE: u64 = 0xffff_cafe_0000_0000;
 pub const KERNEL_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 
+pub const KERNEL_HEAP_BASE:    u64 = 0xffff_8000_0000_0000;
+pub const KERNEL_HEAP_PADDING: u64 = 4096;
+
 #[repr(C)]
 pub struct BootBlock {
     pub size: u64,

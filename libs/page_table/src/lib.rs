@@ -232,7 +232,7 @@ impl PageTable {
                     // Create new entry with max permissions and mark it as present.
                     *entry_ptr = new_table.0 | PAGE_PRESENT | PAGE_USER | PAGE_WRITE;
                 } else if entry & PAGE_SIZE != 0 {
-                    // Mapped page is different than what was specified in `page_type`.
+                    // Mapped page type is different than what was specified in `page_type`.
                     return None;
                 }
             } else {
