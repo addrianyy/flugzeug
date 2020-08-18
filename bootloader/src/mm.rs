@@ -30,9 +30,9 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     }
 }
 
-pub struct PhysicalMemory<'a>(pub &'a mut RangeSet);
+pub struct PhysicalMemory;
 
-impl PhysMem for PhysicalMemory<'_> {
+impl PhysMem for PhysicalMemory {
     unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
         // We don't use paging in the bootloader so physcial address == virtual address.
         // Just make sure that address fits in pointer and region doesn't overflow.
@@ -44,7 +44,10 @@ impl PhysMem for PhysicalMemory<'_> {
     }
 
     fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
-        self.0.allocate(layout.size() as u64, layout.align() as u64)
+        let mut free_memory = BOOT_BLOCK.free_memory.lock();
+        let free_memory     = free_memory.as_mut().unwrap();
+
+        free_memory.allocate(layout.size() as u64, layout.align() as u64)
             .map(|addr| PhysAddr(addr as u64))
     }
 }

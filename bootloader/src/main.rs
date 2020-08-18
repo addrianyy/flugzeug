@@ -18,6 +18,7 @@ use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_S
 use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness};
 use bios::RegisterState;
+use mm::PhysicalMemory;
 use lock::Lock;
 
 // Bootloader is not thread safe. There can be only one instance of it running at a time.
@@ -111,16 +112,13 @@ fn create_kernel_stack() -> u64 {
     let mut page_table = BOOT_BLOCK.page_table.lock();
     let page_table     = page_table.as_mut().unwrap();
 
-    let mut phys_mem = BOOT_BLOCK.free_memory.lock();
-    let mut phys_mem = mm::PhysicalMemory(phys_mem.as_mut().unwrap());
-
     let mut next_stack_address = NEXT_STACK_ADDRESS.lock();
 
     // Get a unique stack address.
     let stack = VirtAddr(*next_stack_address);
 
     // Map the stack to the kernel address space.
-    page_table.map(&mut phys_mem, stack, PageType::Page4K, KERNEL_STACK_SIZE, true, false)
+    page_table.map(&mut PhysicalMemory, stack, PageType::Page4K, KERNEL_STACK_SIZE, true, false)
         .expect("Failed to map kernel stack.");
 
     // Update stack address which will be used by the next AP.
@@ -169,18 +167,15 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
 
-    // WARNING: We can't use any normal allocation routines from here because free memory list
-    // is locked and we would cause a deadlock.
-    // It is possible that kernel uses this memory list too. This is fine as everything is locked.
-    let mut free_mem = BOOT_BLOCK.free_memory.lock();
-    let mut phys_mem = mm::PhysicalMemory(free_mem.as_mut().unwrap());
+    // It is possible that the kernel uses free memory memory list too.
+    // This is fine as everything is locked.
 
     // Allocate page table that will be used by the kernel.
-    let mut kernel_page_table = PageTable::new(&mut phys_mem)
+    let mut kernel_page_table = PageTable::new(&mut PhysicalMemory)
         .expect("Failed to allocate kernel page table.");
 
     // Allocate page table that will be used when transitioning to the kernel.
-    let mut trampoline_page_table = PageTable::new(&mut phys_mem)
+    let mut trampoline_page_table = PageTable::new(&mut PhysicalMemory)
         .expect("Failed to allocate trampoline page table.");
 
     // Map kernel to the virtual memory.
@@ -200,7 +195,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
 
         // Map the segment with correct permissions using standard 4K pages.
         // If some segments overlap, this routine will return an error.
-        kernel_page_table.map_init(&mut phys_mem, virt_addr, PageType::Page4K, virt_size,
+        kernel_page_table.map_init(&mut PhysicalMemory, virt_addr, PageType::Page4K, virt_size,
                                    segment.write, segment.execute,
                                    Some(|offset: u64| {
                                        // Get a byte for given segment offset. Because we have
@@ -249,7 +244,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         for &virt_addr in &[VirtAddr(phys_addr),
                             VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE)] {
             unsafe {
-                trampoline_page_table.map_raw(&mut phys_mem, virt_addr, PageType::Page4K,
+                trampoline_page_table.map_raw(&mut PhysicalMemory, virt_addr, PageType::Page4K,
                                               phys_addr | PAGE_WRITE | PAGE_PRESENT, true, false)
                     .expect("Failed to map physical region in the trampoline page table.");
             }
@@ -288,15 +283,12 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
             }
 
             unsafe {
-                kernel_page_table.map_raw(&mut phys_mem, virt_addr, page_type, raw, true, false)
+                kernel_page_table.map_raw(&mut PhysicalMemory, virt_addr, page_type, raw,
+                                          true, false)
                     .expect("Failed to map physical region in the kernel page table.");
             }
         }
     }
-
-    // Release the locks.
-    drop(phys_mem);
-    drop(free_mem);
 
     // Get physical addresses of page tables and make sure they fit in 32 bit integer.
     let kernel_cr3:     u32 = kernel_page_table.table().0.try_into().unwrap();

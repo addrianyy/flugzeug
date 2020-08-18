@@ -69,6 +69,13 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     println!("Hello from kernel! Core ID: {}.", core!().id);
 
     if core!().id == 0 {
+        let mut p = alloc::vec![];
+        p.push(123);
+        p.push(888);
+        p.remove(0);
+        p.push(123123123);
+        println!("{:?}", p);
+
         let x = alloc::vec![0u8; 512];
         println!("{:p}", x.as_ptr());
 
