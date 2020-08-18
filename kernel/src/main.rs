@@ -42,27 +42,19 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
 
     if core!().id == 0 {
         unsafe {
-            // If we are BSP, launch other cores using APIC.
-
-            let a = mm::translate(PhysAddr(0xfee0_0300), 4).unwrap() as *mut u32;
-            let b = mm::translate(PhysAddr(0xfee0_00f0), 4).unwrap() as *mut u32;
-
-            core::ptr::write_volatile(b, core::ptr::read_volatile(b) | 0x1000);
-
             // Send INIT-SIPI-SIPI sequence to all cores. AP entrypoint is hardcoded here to
             // 0x8000. Don't change it without changing the assembly bootloader.
             // Bootloader will perform normal initialization sequence on launched cores
             // and transfer execution to the kernel entrypoint.
-
             // Delays are required unfortunately.
 
-            core::ptr::write_volatile(a, 0xc4500);
+            mm::write_phys::<u32>(PhysAddr(0xfee0_0300), 0xc4500);
             apic_delay();
 
-            core::ptr::write_volatile(a, 0xc4608);
+            mm::write_phys::<u32>(PhysAddr(0xfee0_0300), 0xc4608);
             apic_delay();
 
-            core::ptr::write_volatile(a, 0xc4608);
+            mm::write_phys::<u32>(PhysAddr(0xfee0_0300), 0xc4608);
         }
     }
 
