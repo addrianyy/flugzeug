@@ -253,9 +253,18 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
 
     // Create linear physical memory map used by kernel at address.
     {
-        // We will map a lot of memory, so use the largest possible page type.
-        // TODO: Don't use 1G pages blindly, check what is the largest page supported by the CPU.
-        let page_type = PageType::Page1G;
+        let features = cpu::get_features();
+
+        // We will map a lot of memory so use the largest possible page type.
+        let page_type = if features.page1g {
+            PageType::Page1G
+        } else if features.page2m {
+            PageType::Page2M
+        } else {
+            // Mapping using 4K pages would take too long and would waste too much memory.
+            panic!("CPU needs to support at least 2M pages.")
+        };
+
         let page_size = page_type as u64;
         let page_mask = page_size - 1;
 

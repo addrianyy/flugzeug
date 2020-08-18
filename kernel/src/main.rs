@@ -35,7 +35,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
                 "We have just entered the kernel, but boot stack is not locked.");
 
         // As we are now in the kernel, mark the stack as available.
-        mm::write_phys::<u8>(STACK_AVAILABLE, 1);
+        mm::write_phys(STACK_AVAILABLE, 1u8);
 
         core_locals::initialize(boot_block);
     }
@@ -48,13 +48,13 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
             // and transfer execution to the kernel entrypoint.
             // Delays are required unfortunately.
 
-            mm::write_phys::<u32>(PhysAddr(0xfee0_0300), 0xc4500);
+            mm::write_phys(PhysAddr(0xfee0_0300), 0xc4500u32);
             apic_delay();
 
-            mm::write_phys::<u32>(PhysAddr(0xfee0_0300), 0xc4608);
+            mm::write_phys(PhysAddr(0xfee0_0300), 0xc4608u32);
             apic_delay();
 
-            mm::write_phys::<u32>(PhysAddr(0xfee0_0300), 0xc4608);
+            mm::write_phys(PhysAddr(0xfee0_0300), 0xc4608u32);
         }
     }
 

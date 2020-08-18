@@ -47,7 +47,6 @@ pub unsafe fn phys_ref<T>(phys_addr: PhysAddr) -> Option<&'static T> {
     Some(&*(virt_addr as *const T))
 }
 
-#[allow(dead_code)]
 pub unsafe fn read_phys<T>(phys_addr: PhysAddr) -> T {
     let align = core::mem::align_of::<T>() as u64;
 
@@ -61,7 +60,6 @@ pub unsafe fn read_phys<T>(phys_addr: PhysAddr) -> T {
     core::ptr::read_volatile(virt_addr as *const T)
 }
 
-#[allow(dead_code)]
 pub unsafe fn write_phys<T>(phys_addr: PhysAddr, value: T) {
     let align = core::mem::align_of::<T>() as u64;
 

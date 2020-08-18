@@ -3,6 +3,53 @@
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 
+#[derive(Default, Copy, Clone)]
+pub struct Cpuid {
+    eax: u32,
+    ebx: u32,
+    ecx: u32,
+    edx: u32,
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct CpuFeatures {
+    pub page2m: bool,
+    pub page1g: bool,
+}
+
+pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
+    let mut cpuid = Cpuid::default();
+
+    unsafe {
+        asm!("cpuid", in("eax") eax, in("ecx") ecx,
+            lateout("eax") cpuid.eax, lateout("ebx") cpuid.ebx,
+            lateout("ecx") cpuid.ecx, lateout("edx") cpuid.edx);
+    }
+
+    cpuid
+}
+
+pub fn get_features() -> CpuFeatures {
+    let mut features = CpuFeatures::default();
+
+    let max_cpuid          = cpuid(0, 0).eax;
+    let max_extended_cpuid = cpuid(0x80000000, 0).eax;
+
+    if max_cpuid >= 1 {
+        let cpuid = cpuid(1, 0);
+
+        features.page2m = (cpuid.edx >> 3) & 1 != 0;
+    }
+
+    if max_extended_cpuid >= 0x80000001 {
+        let cpuid = cpuid(0x80000001, 0);
+
+        features.page1g = (cpuid.edx >> 26) & 1 != 0;
+    }
+
+    features
+}
+
 pub unsafe fn outb(port: u16, value: u8) {
     asm!("out dx, al", in("dx") port, in("al") value);
 }
