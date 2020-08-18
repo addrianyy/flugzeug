@@ -47,6 +47,7 @@ pub unsafe fn phys_ref<T>(phys_addr: PhysAddr) -> Option<&'static T> {
     Some(&*(virt_addr as *const T))
 }
 
+/// Read `T` from an aligned physical address `phys_addr`.
 pub unsafe fn read_phys<T>(phys_addr: PhysAddr) -> T {
     let align = core::mem::align_of::<T>() as u64;
 
@@ -60,6 +61,7 @@ pub unsafe fn read_phys<T>(phys_addr: PhysAddr) -> T {
     core::ptr::read_volatile(virt_addr as *const T)
 }
 
+/// Write `value` to an aligned physical address `phys_addr`.
 pub unsafe fn write_phys<T>(phys_addr: PhysAddr, value: T) {
     let align = core::mem::align_of::<T>() as u64;
 
@@ -71,6 +73,23 @@ pub unsafe fn write_phys<T>(phys_addr: PhysAddr, value: T) {
         .expect("Failed to translate address for `write_phys`.");
 
     core::ptr::write_volatile(virt_addr as *mut T, value);
+}
+
+/// Read `T` from an unaligned physical address `phys_addr`.
+pub unsafe fn read_phys_unaligned<T>(phys_addr: PhysAddr) -> T {
+    let virt_addr = translate(phys_addr, core::mem::size_of::<T>())
+        .expect("Failed to translate address for `read_phys`.");
+
+    core::ptr::read_unaligned(virt_addr as *const T)
+}
+
+/// Write `value` to an unaligned physical address `phys_addr`.
+#[allow(unused)]
+pub unsafe fn write_phys_unaligned<T>(phys_addr: PhysAddr, value: T) {
+    let virt_addr = translate(phys_addr, core::mem::size_of::<T>())
+        .expect("Failed to translate address for `write_phys`.");
+
+    core::ptr::write_unaligned(virt_addr as *mut T, value);
 }
 
 /// Address of the next free virtual address in the kernel heap.

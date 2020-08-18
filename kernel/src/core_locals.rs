@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use core::alloc::Layout;
 
 use crate::mm::{self, FreeList};
@@ -39,6 +39,9 @@ pub struct CoreLocals {
     /// Local APIC for this core.
     pub apic: Lock<Option<Apic>>,
 
+    /// APIC ID for this core. !0 if not cached yet.
+    apic_id: AtomicU32,
+
     /// Free lists for each power-of-two size.
     /// The free list size is `(1 << (index + 3))`.
     free_lists: [Lock<FreeList>; 61],
@@ -63,6 +66,18 @@ impl CoreLocals {
 
         // Get the free list corresponding to this size.
         &self.free_lists[index as usize - 3]
+    }
+
+    pub unsafe fn set_apic_id(&self, apic_id: u32) {
+        self.apic_id.store(apic_id, Ordering::SeqCst);
+    }
+
+    pub fn apic_id(&self) -> Option<u32> {
+        // Return `None` if the APIC ID isn't cached yet.
+        match self.apic_id.load(Ordering::SeqCst) {
+            0xffff_ffff => None,
+            x @ _       => Some(x),
+        }
     }
 }
 
@@ -105,6 +120,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
         self_address: core_locals_ptr,
         id:           core_id,
         apic:         Lock::new(None),
+        apic_id:      AtomicU32::new(!0),
         boot_block,
         free_lists: [
             Lock::new(FreeList::new(0x0000000000000008)),
