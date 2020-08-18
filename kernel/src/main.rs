@@ -28,14 +28,14 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         // 0x7c08 contains a byte that determines if a stack is available to the bootloader.
         // It is used to prevent two instances of bootloader running when launching APs.
         // Make sure that this address is in sync with the assembly bootloader.
-        let stack_available = mm::translate(PhysAddr(0x7c08), 1).unwrap() as *mut u8;
+        const STACK_AVAILABLE: PhysAddr = PhysAddr(0x7c08);
 
         // Currently stack should be locked.
-        assert!(*stack_available == 0,
+        assert!(mm::read_phys::<u8>(STACK_AVAILABLE) == 0,
                 "We have just entered the kernel, but boot stack is not locked.");
 
         // As we are now in the kernel, mark the stack as available.
-        core::ptr::write_volatile(stack_available, 1);
+        mm::write_phys::<u8>(STACK_AVAILABLE, 1);
 
         core_locals::initialize(boot_block);
     }
