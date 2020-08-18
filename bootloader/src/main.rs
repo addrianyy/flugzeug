@@ -109,6 +109,9 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
 
 /// Creates a unique kernel stack required for entering the kernel.
 fn create_kernel_stack() -> u64 {
+    // It is possible that the kernel uses free memory memory list or page tables too.
+    // This is fine as everything is locked.
+
     let mut page_table = BOOT_BLOCK.page_table.lock();
     let page_table     = page_table.as_mut().unwrap();
 
@@ -167,14 +170,11 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
 
-    // It is possible that the kernel uses free memory memory list too.
-    // This is fine as everything is locked.
-
-    // Allocate page table that will be used by the kernel.
+    // Allocate a page table that will be used by the kernel.
     let mut kernel_page_table = PageTable::new(&mut PhysicalMemory)
         .expect("Failed to allocate kernel page table.");
 
-    // Allocate page table that will be used when transitioning to the kernel.
+    // Allocate a page table that will be used when transitioning to the kernel.
     let mut trampoline_page_table = PageTable::new(&mut PhysicalMemory)
         .expect("Failed to allocate trampoline page table.");
 
