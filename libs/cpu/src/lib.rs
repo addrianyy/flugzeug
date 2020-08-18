@@ -15,6 +15,8 @@ pub struct Cpuid {
 pub struct CpuFeatures {
     pub page2m: bool,
     pub page1g: bool,
+    pub apic:   bool,
+    pub x2apic: bool,
 }
 
 pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
@@ -38,7 +40,9 @@ pub fn get_features() -> CpuFeatures {
     if max_cpuid >= 1 {
         let cpuid = cpuid(1, 0);
 
-        features.page2m = (cpuid.edx >> 3) & 1 != 0;
+        features.page2m = (cpuid.edx >>  3) & 1 != 0;
+        features.apic   = (cpuid.edx >>  9) & 1 != 0;
+        features.x2apic = (cpuid.ecx >> 21) & 1 != 0;
     }
 
     if max_extended_cpuid >= 0x80000001 {

@@ -8,15 +8,9 @@ extern crate alloc;
 #[macro_use] mod serial;
 mod mm;
 mod panic;
+mod apic;
 
 use page_table::PhysAddr;
-
-fn apic_delay() {
-    // Just waste a few cycles to wait for APIC.
-    for _ in 0..100000 {
-        unsafe { asm!("nop"); }
-    }
-}
 
 #[no_mangle]
 extern "C" fn _start(boot_block: PhysAddr) -> ! {
@@ -38,6 +32,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         mm::write_phys(STACK_AVAILABLE, 1u8);
 
         core_locals::initialize(boot_block);
+        apic::initialize();
     }
 
     if core!().id == 0 {
@@ -46,43 +41,17 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
             // 0x8000. Don't change it without changing the assembly bootloader.
             // Bootloader will perform normal initialization sequence on launched cores
             // and transfer execution to the kernel entrypoint.
-            // Delays are required unfortunately.
 
-            mm::write_phys(PhysAddr(0xfee0_0300), 0xc4500u32);
-            apic_delay();
+            let mut apic = core!().apic.lock();
+            let apic     = apic.as_mut().unwrap();
 
-            mm::write_phys(PhysAddr(0xfee0_0300), 0xc4608u32);
-            apic_delay();
-
-            mm::write_phys(PhysAddr(0xfee0_0300), 0xc4608u32);
+            apic.write_icr(0xc4500);
+            apic.write_icr(0xc4608);
+            apic.write_icr(0xc4608);
         }
     }
 
     println!("Hello from kernel! Core ID: {}.", core!().id);
-
-    if core!().id == 0 {
-        let mut p = alloc::vec![];
-        p.push(123);
-        p.push(888);
-        p.remove(0);
-        p.push(123123123);
-        println!("{:?}", p);
-
-        let x = alloc::vec![0u8; 512];
-        println!("{:p}", x.as_ptr());
-
-        let y = alloc::vec![0u8; 512];
-        println!("{:p}", y.as_ptr());
-
-        drop(x);
-        drop(y);
-
-        let x = alloc::vec![0u8; 512];
-        println!("{:p}", x.as_ptr());
-
-        let y = alloc::vec![0u8; 512];
-        println!("{:p}", y.as_ptr());
-    }
 
     cpu::halt();
 }

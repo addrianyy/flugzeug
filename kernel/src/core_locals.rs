@@ -4,6 +4,7 @@ use core::alloc::Layout;
 use crate::mm::{self, FreeList};
 use boot_block::BootBlock;
 use page_table::PhysAddr;
+use crate::apic::Apic;
 use lock::Lock;
 
 static NEXT_FREE_CORE_ID: AtomicU64 = AtomicU64::new(0);
@@ -34,6 +35,9 @@ pub struct CoreLocals {
 
     /// Data shared between bootloader and kernel.
     pub boot_block: &'static BootBlock,
+
+    /// Local APIC for this core.
+    pub apic: Lock<Option<Apic>>,
 
     /// Free lists for each power-of-two size.
     /// The free list size is `(1 << (index + 3))`.
@@ -69,6 +73,9 @@ impl SyncGuard for CoreLocals {}
 pub unsafe fn initialize(boot_block: PhysAddr) {
     const IA32_GS_BASE: u32 = 0xc0000101;
 
+    // Make sure that core locals haven't been initialized yet.
+    assert!(cpu::rdmsr(IA32_GS_BASE) == 0, "Core locals were already initialized.");
+
     // Get a unique identifier for this core.
     let core_id = NEXT_FREE_CORE_ID.fetch_add(1, Ordering::SeqCst);
 
@@ -97,6 +104,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
     let core_locals = CoreLocals {
         self_address: core_locals_ptr,
         id:           core_id,
+        apic:         Lock::new(None),
         boot_block,
         free_lists: [
             Lock::new(FreeList::new(0x0000000000000008)),
