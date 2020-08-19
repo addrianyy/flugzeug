@@ -309,7 +309,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
 }
 
 #[global_allocator]
-static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
+pub static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
