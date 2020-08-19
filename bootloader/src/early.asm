@@ -443,10 +443,15 @@ entry_32:
     mov     fs, ax
     mov     gs, ax
 
-    push    BOOT_DISK_DESC
-    push    disk_bios_data
+    ; Align the stack to 16 byte boundary and add 8 to it. We will push another 8 bytes so
+    ; before the call the stack will be properly aligned.
+    and     esp, ~0x10
+    sub     esp, 0x8
 
-    ; Get bootloader entrypoint and call it.
+    push    dword BOOT_DISK_DESC
+    push    dword disk_bios_data
+
+    ; Get the bootloader entrypoint and call it. (Jump cannot be used because of the ABI.)
     mov     eax, dword [BOOTLOADER_BASE + 0x18]
     call    eax
 

@@ -78,11 +78,11 @@ enter_kernel:
     ; we can actually switch to the kernel CR3.
     mov cr3, rax
 
-    ; Reserve some shadow stack space.
-    sub rsp, 0x28
+    ; Reserve some shadow stack space. Keep the stack 16 byte aligned.
+    sub rsp, 0x30
 
-    ; Jump to the 64 bit kernel!
-    jmp rdx
+    ; Call the 64 bit kernel! (Jump cannot be used because of the ABI.)
+    call rdx
 
 ; GDT used to enter long mode.
 align 8
