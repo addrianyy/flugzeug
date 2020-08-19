@@ -55,6 +55,7 @@ pub fn total_cores() -> u32 {
     total_cores
 }
 
+/// Notify that this core is online and wait for other cores to become online.
 pub unsafe fn notify_core_online() {
     /// Number of cores which have notified that they are online.
     static CORES_ONLINE: AtomicU32 = AtomicU32::new(0);
@@ -212,6 +213,9 @@ unsafe fn parse_madt(phys_addr: PhysAddr) -> BTreeSet<u32> {
 }
 
 pub unsafe fn initialize() {
+    // Make sure that the ACPI hasn't been initialized yet.
+    assert!(TOTAL_CORES.load(Ordering::SeqCst) == 0, "ACPI was already initialized.");
+
     // Get the address of the EBDA from the BDA.
     let ebda = mm::read_phys::<u16>(PhysAddr(0x40e)) as u64;
 
@@ -220,7 +224,7 @@ pub unsafe fn initialize() {
         // First 1K of the EBDA.
         (ebda, ebda + 1024),
 
-        // Constant range specified by ACPI.
+        // Constant range specified by ACPI specification.
         (0xe0000, 0xfffff),
     ];
 
@@ -310,7 +314,20 @@ pub unsafe fn initialize() {
         }
     }
 
-    let apics      = apics.expect("No APIC table was found in RSDP.");
+    let current_apic_id = core!().apic_id().unwrap();
+
+    let apics = apics.unwrap_or_else(|| {
+        println!("WARNING: No APIC table was found on the system.");
+
+        // If we haven't found APIC table then just report our APIC ID.
+
+        let mut apics = BTreeSet::new();
+
+        apics.insert(current_apic_id);
+
+        apics
+    });
+
     let core_count = apics.len();
 
     // Make sure that the total core count doesn't exceed maximum supported value.
@@ -322,27 +339,37 @@ pub unsafe fn initialize() {
     let mut apic = core!().apic.lock();
     let apic     = apic.as_mut().unwrap();
 
-    let current_apic_id = core!().apic_id().unwrap();
-
     // Mark our core (BSP) as online.
     set_core_state(current_apic_id, CoreState::Online);
 
+    // Launch all available cores one by one.
     for &apic_id in &apics {
         // Don't IPI ourselves.
         if apic_id == current_apic_id {
             continue;
         }
 
+        // AP entrypoint is hardcoded here to 0x8000. Don't change it without changing
+        // the assembly bootloader.
+        const AP_ENTRYPOINT: u32 = 0x8000;
+
+        // Calculate the SIPI vector which will cause APs to start
+        // execution at the `AP_ENTRYPOINT`.
+        let sipi_vector = (AP_ENTRYPOINT / 0x1000) & 0xff;
+
+        // Make sure that the `AP_ENTRYPOINT` is encodable in SIPI vector.
+        assert!(sipi_vector * 0x1000 == AP_ENTRYPOINT, "AP entrypoint {:x} cannot be encoded.",
+                AP_ENTRYPOINT);
+
         // Mark the core as launched.
         set_core_state(apic_id, CoreState::Launched);
 
-        // Send INIT-SIPI-SIPI sequence to all cores. AP entrypoint is hardcoded here to
-        // 0x8000. Don't change it without changing the assembly bootloader.
-        // Bootloader will perform normal initialization sequence on launched cores
+        // Launch the core by sending INIT-SIPI-SIPI sequence to to it. 
+        // Bootloader will perform normal initialization sequence on the launched core
         // and transfer execution to the kernel entrypoint.
         apic.ipi(apic_id, 0x4500);
-        apic.ipi(apic_id, 0x4608);
-        apic.ipi(apic_id, 0x4608);
+        apic.ipi(apic_id, 0x4600 | sipi_vector);
+        apic.ipi(apic_id, 0x4600 | sipi_vector);
 
         // Wait for the core to become online.
         while core_state(apic_id) != CoreState::Online {}
