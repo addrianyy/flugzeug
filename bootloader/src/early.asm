@@ -10,26 +10,12 @@
 ; Ensure that CS == 0 and IP == 0x7C00.
 jmp 0x00:entry_16
 
-; Do not move this! These values must be at 0x7c08!
-times 8 - ($ - $$) db 0x00
-stack_available: db 1
-first_boot:      db 1
-
 ; 16 bit entry point for bootloader.
 [bits 16]
 entry_16:
     ; Disable interrupts and clear direction flag.
     cli
     cld
-
-    ; Wait for stack to become available. This will disallow two instances of bootloader
-    ; running at the same time. Bootloader is not thread safe.
-    .wait_for_stack:
-        pause
-        xor         al, al
-        lock xchg   byte [stack_available], al
-        test        al, al
-        jz          short .wait_for_stack
 
     ; Zero out used segments.
     xor     ax, ax
@@ -38,17 +24,19 @@ entry_16:
     mov     ss, ax
 
     ; Setup initial stack pointer just above our bootloader.
+    ; This is not thread safe, but kernel makes sure that there is only one instance
+    ; of the bootloader running at a time.
     mov     sp, 0x7c00
 
-    ; If it's not the first boot, don't load second stage bootloader from disk. It's
+    ; If it's not the first boot, don't load second stage bootloader from the disk. It's
     ; already there.
     mov     al, byte [first_boot]
     test    al, al
     jz      already_loaded
 
-    ; This is the first time bootloader is running, not just AP launching.
+    ; This is the first time bootloader is ran, we are not just launching APs.
 
-    ; Make sure that the next time bootloader is run we will not load all data again.
+    ; Make sure that the next time bootloader is ran we will not load all data again.
     mov     byte [first_boot], 0
 
     ; After setting up stack interrupts can be enabled again.
@@ -302,6 +290,10 @@ error_string_addr: dw 0
 reset_error_str:  db "RESET FAIL.",  0
 params_error_str: db "PARAMS FAIL.", 0
 read_error_str:   db "READ FAIL.",   0
+
+; Determines if we are booting for the first time and we need to load all data from the
+; disk. This is 0 when launching APs.
+first_boot: db 1
 
 ; Data between byte 446 and 510 will be overwritten by BIOS.
 %if ($ - $$) > 446

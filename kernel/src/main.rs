@@ -13,20 +13,6 @@ mod acpi;
 
 use page_table::PhysAddr;
 
-unsafe fn release_bootloader_stack() {
-    // 0x7c08 contains a byte that determines if a stack is available to the bootloader.
-    // It is used to prevent two instances of bootloader running when launching APs.
-    // Make sure that this address is in sync with the assembly bootloader.
-    const STACK_AVAILABLE: PhysAddr = PhysAddr(0x7c08);
-
-    // Currently stack should be locked.
-    assert!(mm::read_phys::<u8>(STACK_AVAILABLE) == 0,
-            "We have just entered the kernel, but boot stack is not locked.");
-
-    // As we are now in the kernel, mark the stack as available.
-    mm::write_phys(STACK_AVAILABLE, 1u8);
-}
-
 #[no_mangle]
 extern "C" fn _start(boot_block: PhysAddr) -> ! {
     // Make sure that LLVM data layout isn't broken.
@@ -34,9 +20,6 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
             "U64 has invalid size/alignment.");
 
     unsafe {
-        // Make the stack available for launching APs.
-        release_bootloader_stack();
-
         // Initialize crucial kernel per-core components.
         core_locals::initialize(boot_block);
         apic::initialize();

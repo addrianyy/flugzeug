@@ -22,7 +22,7 @@ use mm::PhysicalMemory;
 use lock::Lock;
 
 // Bootloader is not thread safe. There can be only one instance of it running at a time.
-// Stack lock in `early.asm` makes sure that this is indeed what happens.
+// Kernel launches cores one by one to make sure that this is indeed what happens.
 
 /// Boot block is a shared data structure between kernel and bootloader. It must have
 /// exactly the same shape in 32 bit and 64 bit mode. It allows for concurrent memory

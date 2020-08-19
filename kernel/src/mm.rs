@@ -62,6 +62,7 @@ pub unsafe fn read_phys<T>(phys_addr: PhysAddr) -> T {
 }
 
 /// Write `value` to an aligned physical address `phys_addr`.
+#[allow(unused)]
 pub unsafe fn write_phys<T>(phys_addr: PhysAddr, value: T) {
     let align = core::mem::align_of::<T>() as u64;
 

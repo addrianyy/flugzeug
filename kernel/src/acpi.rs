@@ -371,7 +371,8 @@ pub unsafe fn initialize() {
         apic.ipi(apic_id, 0x4600 | sipi_vector);
         apic.ipi(apic_id, 0x4600 | sipi_vector);
 
-        // Wait for the core to become online.
+        // Wait for the core to become online. Bootloader is not thread safe so there can
+        // be only one launching AP at a time.
         while core_state(apic_id) != CoreState::Online {}
     }
 }
