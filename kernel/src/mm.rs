@@ -1,7 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use page_table::{VirtAddr, PhysAddr, PhysMem, PageType};
+use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE, PAGE_NX};
 use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
                  KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING};
 
@@ -314,4 +314,47 @@ static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
     panic!("Allocation of memory with layout {:?} failed!", layout);
+}
+
+/// Make physical region non-executable. It can be done only after all APs are launched.
+pub unsafe fn enable_nx_on_physical_region() {
+    // This code is roughly the same as in bootloader.
+
+    let features = cpu::get_features();
+
+    // Get the page type used by bootloader to create a physical memory map. If types don't match
+    // mapping will fail.
+    let page_type = if features.page1g {
+        PageType::Page1G
+    } else if features.page2m {
+        PageType::Page2M
+    } else {
+        // Bootloader shouldn't map physical memory using 4K pages.
+        unreachable!()
+    };
+
+    let page_size = page_type as u64;
+
+    let mut page_table = core!().boot_block.page_table.lock();
+    let page_table     = page_table.as_mut().unwrap();
+
+    // Recreate kernel physical memory map.
+    for phys_addr in (0..KERNEL_PHYSICAL_REGION_SIZE).step_by(page_size as usize) {
+        // Map current `phys_addr` at virtual address
+        // `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`.
+        let virt_addr = VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE);
+
+        // This physical memory page will be writable. Unlike bootloader, we can now set NX bit.
+        let mut raw = phys_addr | PAGE_PRESENT | PAGE_WRITE | PAGE_NX;
+
+        // Set PAGE_SIZE bit if we aren't using standard 4K pages.
+        if page_type != PageType::Page4K {
+            raw |= PAGE_SIZE;
+        }
+
+        // Map the memory. Allow updating existing mappings, disallow creating new tables.
+        page_table.map_raw(&mut PhysicalMemory, virt_addr, page_type, raw,
+                           false, true)
+            .expect("Failed to remap physical region in the kernel page table.");
+    }
 }

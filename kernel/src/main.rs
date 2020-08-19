@@ -31,6 +31,12 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
 
         // Notify that this core is online and wait for other cores.
         acpi::notify_core_online();
+
+        if core!().id == 0 {
+            // All cores are now launched and we can make kernel physical region non-executable.
+            // We do this only once because page tables are shared between cores.
+            mm::enable_nx_on_physical_region();
+        }
     }
 
     println!("Hello from kernel! Core ID: {}. APIC ID {:?}.", core!().id, core!().apic_id());
