@@ -4,6 +4,7 @@
 
 use core::alloc::Layout;
 
+/// Page properties used by 64 bit x86 paging.
 pub const PAGE_PRESENT:         u64 = 1 << 0;
 pub const PAGE_WRITE:           u64 = 1 << 1;
 pub const PAGE_USER:            u64 = 1 << 2;
@@ -20,26 +21,36 @@ pub struct PhysAddr(pub u64);
 pub struct VirtAddr(pub u64);
 
 impl VirtAddr {
+    /// Check if the address is canonical. If it's not then it cannot be mapped and every access
+    /// to it will cause #GP.
     pub fn is_canonical(&self) -> bool {
         let mut addr = self.0 as i64;
 
+        // Sign extend last 12 bits of the address.
         addr <<= 12;
         addr >>= 12;
 
+        // Check if sign extended address is the same as original one.
         addr as u64 == self.0
     }
 }
 
+/// Trait that allows manipulation of physical memory in various environments.
 pub trait PhysMem {
+    /// Translate a physical address `phys_addr` to a virtual address. Returned pointer
+    /// is valid only for `size` bytes.
     unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8>;
 
+    /// Allocate a physical region with `layout`.
     fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr>;
 
+    /// Allocate a zeroed physical region with `layout`.
     fn alloc_phys_zeroed(&mut self, layout: Layout) -> Option<PhysAddr> {
+        // Allocate normal, non-zeroed physical region.
         let phys_addr = self.alloc_phys(layout)?;
 
         unsafe {
-            // Translate physical address to virtual one and zero memory.
+            // Translate physical address to virtual one and zero out the memory.
             let virt_addr = self.translate(phys_addr, layout.size())?;
             core::ptr::write_bytes(virt_addr, 0, layout.size())
         }
@@ -48,6 +59,7 @@ pub trait PhysMem {
     }
 }
 
+/// x86 page type. CPU may not support all these page types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[repr(u64)]
 pub enum PageType {
@@ -56,13 +68,17 @@ pub enum PageType {
     Page1G = 1 * 1024 * 1024 * 1024,
 }
 
+/// Wrapper that allows manipulating x86 page tables. It doesn't own any page tables so
+/// they won't get freed on `Drop`.
 pub struct PageTable {
+    /// Physical address of a root table (PML4), Must be always valid.
     table: PhysAddr,
 }
 
 impl PageTable {
+    /// Create a new, empty page table witout any mapped memory.
     pub fn new(phys_mem: &mut impl PhysMem) -> Option<Self> {
-        // Allocate empty root table and use it.
+        // Allocate empty root table (PML4) and use it.
         let table = phys_mem.alloc_phys_zeroed(
             Layout::from_size_align(4096, 4096).ok()?)?;
 
@@ -71,6 +87,7 @@ impl PageTable {
         })
     }
 
+    /// Create a page table from PML4 physical address (eg. CR3).
     pub unsafe fn from_table(table: PhysAddr) -> Self {
         // Mask off VPID and other stuff from CR3.
         Self {
@@ -78,10 +95,13 @@ impl PageTable {
         }
     }
 
+    /// Get the physical address of a root table (PML4).
     pub fn table(&mut self) -> PhysAddr {
         self.table
     }
 
+    /// Map region at `virt_addr` with size `size`. Mapped region will contain usable but
+    /// uninitialized data.
     pub fn map(
         &mut self,
         phys_mem:  &mut impl PhysMem,
@@ -95,6 +115,8 @@ impl PageTable {
                       write, exec, None::<fn(u64) -> u8>)
     }
 
+    /// Map region at `virt_addr` with size `size`. `init` function is used to initialize
+    /// memory contents of the new region.
     pub fn map_init(
         &mut self,
         phys_mem:  &mut impl PhysMem,
@@ -156,6 +178,7 @@ impl PageTable {
         Some(())
     }
 
+    /// Set page table entry value that describes `virt_addr` to `raw`.
     pub unsafe fn map_raw(
         &mut self,
         phys_mem:  &mut impl PhysMem,

@@ -2,7 +2,7 @@
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 
-/// Inclusive range.
+/// An inclusive range.
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct Range {
@@ -11,20 +11,27 @@ pub struct Range {
 }
 
 impl Range {
+    /// Get the size of this range.
     pub fn size(&self) -> u64 {
+        // Add one because range is inclusive.
         self.end - self.start + 1
     }
 }
 
-/// Set of inclusive ranges.
+/// Set of unique, inclusive ranges.
 #[derive(Clone)]
 #[repr(C)]
 pub struct RangeSet {
+    /// Static array of all available ranges. There cannot be more than 256 ranges. We need to do
+    /// this because we can't import `alloc` crate and get `Vec`.
     ranges: [Range; 256],
-    used:   u32,
+
+    /// Number of ranges used in this set.
+    used: u32,
 }
 
 impl RangeSet {
+    /// Create a new, empty `RangeSet`.
     pub const fn new() -> Self {
         Self {
             ranges: [Range { start: 0, end: 0 }; 256],
@@ -32,10 +39,12 @@ impl RangeSet {
         }
     }
 
+    /// Get all used ranges in this `RangeSet`.
     pub fn entries(&self) -> &[Range] {
         &self.ranges[..self.used as usize]
     }
 
+    /// Insert inclusive range to `RangeSet`. This function will handle possible merges.
     pub fn insert(&mut self, mut range: Range) {
         assert!(range.start <= range.end, "Range to insert has invalid shape.");
 
@@ -67,6 +76,8 @@ impl RangeSet {
         self.add_entry(range);
     }
 
+    /// Remove inclusive range from `RangeSet`. This function will handle possible cutoffs and
+    /// splits.
     pub fn remove(&mut self, range: Range) {
         assert!(range.start <= range.end, "Range to remove has invalid shape.");
 
@@ -119,6 +130,9 @@ impl RangeSet {
         }
     }
 
+    /// Move a region that satisfies requested `size` and `align` out of the set and return it.
+    /// If there are many calls to this function with different `size` and `align` then `RangeSet`
+    /// may get very fragmented.
     pub fn allocate(&mut self, size: u64, align: u64) -> Option<usize> {
         // Zero-sized allocations are not allowed.
         if size == 0 {
@@ -191,13 +205,17 @@ impl RangeSet {
         })
     }
 
+    /// Push an entry to the `RangeSet`.
     fn add_entry(&mut self, range: Range) {
+        // Make sure that static storage is enough to hold this many ranges.
         assert!((self.used as usize) < self.ranges.len(), "Out of space in `RangeSet`.");
 
+        // Insert range to the end of the list.
         self.ranges[self.used as usize] = range;
         self.used += 1;
     }
 
+    /// Delete an entry from the `RangeSet`.
     fn delete_entry(&mut self, to_delete: usize) {
         assert!(to_delete < self.used as usize, "Index to delete is out of bounds.");
 
@@ -206,7 +224,7 @@ impl RangeSet {
             self.ranges.swap(idx, idx + 1);
         }
 
-        // Free last entry.
+        // Free the last entry.
         self.used -= 1;
     }
 }

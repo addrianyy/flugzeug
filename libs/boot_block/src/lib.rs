@@ -7,26 +7,38 @@ use rangeset::RangeSet;
 use page_table::PageTable;
 use serial_port::SerialPort;
 
+/// A region which is used to allocate unique stacks for each core.
 pub const KERNEL_STACK_BASE:    u64 = 0x0000_7473_0000_0000;
 pub const KERNEL_STACK_SIZE:    u64 = 4  * 1024 * 1024;
 pub const KERNEL_STACK_PADDING: u64 = 64 * 1024 * 1024;
 
+/// A region which allows kernel (which uses paging) to access raw physical memory.
 pub const KERNEL_PHYSICAL_REGION_BASE: u64 = 0xffff_cafe_0000_0000;
 pub const KERNEL_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 
+/// A region which is used by dynamic allocations in the kernel.
 pub const KERNEL_HEAP_BASE:    u64 = 0xffff_8000_0000_0000;
 pub const KERNEL_HEAP_PADDING: u64 = 4096;
 
+/// Data shared between the bootloader and the kernel. Allows for concurrent access.
 #[repr(C)]
 pub struct BootBlock {
+    /// Size of the `BootBlock` used to make sure that the shape of the structure is the same
+    /// in 32 bit mode and 64 bit mode.
     pub size: u64,
 
+    /// Free physical memory ranges available on the system.
     pub free_memory: Lock<Option<RangeSet>>,
+
+    /// Serial port connection which allows for `print!` macros.
     pub serial_port: Lock<Option<SerialPort>>,
-    pub page_table:  Lock<Option<PageTable>>,
+
+    /// Page tables created by the bootloader and used by the kernel.
+    pub page_table: Lock<Option<PageTable>>,
 }
 
 impl BootBlock {
+    /// Create an empty `BootBlock` and cache the size of it in current processor mode.
     pub const fn new() -> Self {
         Self {
             size:        core::mem::size_of::<Self>() as u64,
