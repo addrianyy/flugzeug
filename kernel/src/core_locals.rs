@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use core::alloc::Layout;
 
+use crate::interrupts::Interrupts;
 use crate::mm::{self, FreeList};
 use boot_block::BootBlock;
 use page_table::PhysAddr;
@@ -38,6 +39,9 @@ pub struct CoreLocals {
 
     /// Local APIC for this core.
     pub apic: Lock<Option<Apic>>,
+
+    /// Interrupt handlers for this core.
+    pub interrupts: Lock<Option<Interrupts>>,
 
     /// APIC ID for this core. !0 if not cached yet.
     apic_id: AtomicU32,
@@ -121,6 +125,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
         id:           core_id,
         apic:         Lock::new(None),
         apic_id:      AtomicU32::new(!0),
+        interrupts:   Lock::new(None),
         boot_block,
         free_lists: [
             Lock::new(FreeList::new(0x0000000000000008)),

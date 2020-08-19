@@ -1,15 +1,18 @@
 #![no_std]
 #![no_main]
-#![feature(panic_info_message, alloc_error_handler, asm, const_in_array_repeat_expressions)]
+#![feature(panic_info_message, alloc_error_handler, global_asm, asm,
+           const_in_array_repeat_expressions)]
 
 extern crate alloc;
 
 #[macro_use] mod core_locals;
 #[macro_use] mod serial;
 mod mm;
-mod panic;
 mod apic;
 mod acpi;
+mod panic;
+mod interrupts;
+mod interrupts_misc;
 
 use page_table::PhysAddr;
 
@@ -22,6 +25,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     unsafe {
         // Initialize crucial kernel per-core components.
         core_locals::initialize(boot_block);
+        interrupts::initialize();
         apic::initialize();
 
         if core!().id == 0 {
