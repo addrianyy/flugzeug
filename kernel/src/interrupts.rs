@@ -112,6 +112,9 @@ pub unsafe fn initialize() {
         0x0000920000000000u64, // Data segment - 64 bit.
     ];
 
+    // Get the selector of the TSS.
+    let tss_selector: u16 = core::mem::size_of_val(&gdt[..]) as u16;
+
     let tss_base  = &*tss as *const Tss as u64;
     let tss_limit = core::mem::size_of::<Tss>() as u64 - 1;
 
@@ -137,7 +140,7 @@ pub unsafe fn initialize() {
     asm!("lgdt [{}]", in(reg) &gdtr);
 
     // Load new TSS.
-    asm!("ltr ax", in("ax") 0x18);
+    asm!("ltr {:x}", in(reg) tss_selector);
 
     let mut idt = Vec::with_capacity(256);
 

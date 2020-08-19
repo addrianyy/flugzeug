@@ -5,7 +5,7 @@ global_asm!(r#"
     .extern handle_interrupt
 
     call_handler:
-        // Save register state.
+        // Save the register state.
         push rax
         push rbx
         push rcx
@@ -25,7 +25,7 @@ global_asm!(r#"
         // Save the current stack pointer for the 4th argument (register state).
         mov rcx, rsp
 
-        // Allocate shadow space and align stack to 16 byte bounadary.
+        // Allocate shadow space and align the stack to 16 byte boundary.
         mov rbp, rsp
         sub rsp, 0x20
         and rsp, ~0xf
@@ -35,7 +35,7 @@ global_asm!(r#"
         // Restore the stack pointer.
         mov rsp, rbp
 
-        // Restore register state.
+        // Restore the register state.
         pop  qword ptr [r15 + 0x18] // R15
         pop  r14
         pop  r13
@@ -51,45 +51,48 @@ global_asm!(r#"
         pop  rcx
         pop  rbx
         pop  rax
+
         ret
 
     .macro make_handler id, has_error_code
         .global interrupt_\id
 
         interrupt_\id:
-            // Save registers which will be used.
+            // Save registers which we will clobber.
             push r15
             push rdi
             push rsi
             push rdx
 
-            // Save current frame.
+            // Save the current stack frame.
             mov r15, rsp
 
-            // Get interrupt ID.
+            // Get the interrupt ID.
             mov edi, \id
 
             .if \has_error_code
-                // Get interrupt frame and error code.
+                // Get the interrupt frame and error code.
                 lea rsi, [rsp+0x28]
                 mov rdx, [rsp+0x20]
 
-                // Align stack to 16 byte boundary.
+                // Align the stack to 16 byte boundary.
                 sub rsp, 8
             .else
-                // Get interrupt frame and zero out error code.
+                // Get the interrupt frame and zero out error code.
                 lea rsi, [rsp+0x20]
                 mov rdx, 0
+
+                // Stack is already 16 byte aligned.
             .endif
 
             call call_handler
 
             .if \has_error_code
-                // Remove alignment from before.
+                // Remove stack alignment from before.
                 add rsp, 8
             .endif
 
-            // Restore used registers.
+            // Restore clobbered registers.
             pop rdx
             pop rsi
             pop rdi
