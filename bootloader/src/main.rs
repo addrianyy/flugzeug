@@ -259,6 +259,9 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         let page_type = if features.page1g {
             PageType::Page1G
         } else if features.page2m {
+            println!("WARNING: CPU doesn't support 1G pages, mapping physical \
+                     region may take a while.");
+
             PageType::Page2M
         } else {
             // Mapping using 4K pages would take too long and would waste too much memory.
