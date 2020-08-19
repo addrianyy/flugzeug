@@ -25,8 +25,10 @@ global_asm!(r#"
         // Save the current stack pointer for the 4th argument (register state).
         mov rcx, rsp
 
-        // Allocate shadow space and align the stack to 16 byte boundary.
+        // Save the current stack pointer to restore it later.
         mov rbp, rsp
+
+        // Allocate shadow space and align the stack to 16 byte boundary.
         sub rsp, 0x20
         and rsp, ~0xf
 

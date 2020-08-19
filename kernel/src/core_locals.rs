@@ -80,7 +80,7 @@ impl CoreLocals {
         // Return `None` if the APIC ID isn't cached yet.
         match self.apic_id.load(Ordering::SeqCst) {
             0xffff_ffff => None,
-            x @ _       => Some(x),
+            x           => Some(x),
         }
     }
 }
