@@ -2,7 +2,7 @@ use std::process::Command;
 use std::path::Path;
 use std::fs;
 
-use elfparse::{Elf, Bitness};
+use elfparse::{Elf, Bitness, SegmentType, Machine};
 use bdd::BootDiskDescriptor;
 
 // Don't change. Hardcoded in bootloader assembly file.
@@ -39,6 +39,7 @@ fn prepare_bootloader_binary(binary: Vec<u8>) -> (Vec<u8>, u32) {
     let elf = Elf::parse(&binary).expect("Failed to parse bootloader ELF.");
 
     assert!(elf.bitness() == Bitness::Bits32, "Bootloader is not 32 bit.");
+    assert!(elf.machine() == Machine::X86, "Bootloader is not x86 binary.");
     assert!(elf.base_address() == BOOTLOADER_BASE, "Bootloader has invalid base address.");
 
     let mut mapped = Vec::new();
@@ -49,7 +50,11 @@ fn prepare_bootloader_binary(binary: Vec<u8>) -> (Vec<u8>, u32) {
         }
     }
 
-    elf.loadable_segments(|segment| {
+    elf.segments(|segment| {
+        if segment.seg_type != SegmentType::Load {
+            return;
+        }
+
         let virt_offset = (segment.virt_addr - elf.base_address()) as usize;
         let virt_size   = segment.virt_size as usize;
 

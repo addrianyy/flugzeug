@@ -16,7 +16,7 @@ use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_
 
 use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE};
 use bdd::{BootDiskDescriptor, BootDiskData};
-use elfparse::{Elf, Bitness};
+use elfparse::{Elf, Bitness, SegmentType, Machine};
 use bios::RegisterState;
 use mm::PhysicalMemory;
 use lock::Lock;
@@ -169,6 +169,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     // Parse the kernel ELF file and make sure that it is 64 bit.
     let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
+    assert!(elf.machine() == Machine::Amd64, "Loaded kernel is AMD64 binary.");
 
     // Allocate a page table that will be used by the kernel.
     let mut kernel_page_table = PageTable::new(&mut PhysicalMemory)
@@ -179,7 +180,12 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         .expect("Failed to allocate trampoline page table.");
 
     // Map kernel to the virtual memory.
-    elf.loadable_segments(|segment| {
+    elf.segments(|segment| {
+        // Skip non-loadable segments.
+        if segment.seg_type != SegmentType::Load {
+            return;
+        }
+
         // Page table `map_init` function requires both address and size to be page aligned, but
         // segments in ELF files are often unaligned.
 
