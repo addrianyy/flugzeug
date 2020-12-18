@@ -39,26 +39,28 @@ fn main() {
         };
     }
 
+    let bootloader_name = "uefi_bootloader";
+
     fs::create_dir_all(Path::new("build"))
         .expect("Couldn't create `build` directory.");
 
-    fs::create_dir_all(Path::new("build").join("bootloader"))
-        .expect("Couldn't create `build/bootloader` directory.");
+    fs::create_dir_all(Path::new("build").join(bootloader_name))
+        .expect("Couldn't create `build/xx_bootloader` directory.");
 
     fs::create_dir_all(make_path!(Path::new("build"), "kernel"))
         .expect("Couldn't create `build/kernel` directory.");
 
-    let bootloader_dir = Path::new("bootloader").canonicalize()
-        .expect("Couldn't get path to `bootloader` directory");
+    let bootloader_dir = Path::new(bootloader_name).canonicalize()
+        .expect("Couldn't get path to `xx_bootloader` directory");
 
     let kernel_dir = Path::new("kernel").canonicalize()
         .expect("Couldn't get path to `kernel` directory");
 
-    let bootloader_build_dir = Path::new("build").join("bootloader").canonicalize()
-        .expect("Couldn't get path to `build/bootloader` directory");
+    let bootloader_build_dir = Path::new("build").join(bootloader_name).canonicalize()
+        .expect("Couldn't get path to `build/xx_bootloader` directory");
 
     let kernel_build_dir = Path::new("build").join("kernel").canonicalize()
-        .expect("Couldn't get path to `kernel/bootloader` directory");
+        .expect("Couldn't get path to `build/kernel` directory");
 
     println!("\nCompiling kernel...");
     if !build(
@@ -113,12 +115,11 @@ fn main() {
 
     println!("\nCreating bootable image...");
 
-    let image_path = Path::new("build").join("image");
+    let image_path = Path::new("build").join("uefi_image");
     let image_file = fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .truncate(true)
-        .open(&image_path)
+        .open(image_path)
         .expect("Failed to create FAT bootable image.");
 
     let startup = r#"

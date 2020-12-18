@@ -52,7 +52,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         asm!("mov ax, ds", out("ax") ds);
     }
 
-    println!("Hello from kernel! Core ID: {}. APIC ID {:?}. CS 0x{:x}, DS 0x{:x}",
+    println!("Hello from flugzeug kernel! Core ID: {}. APIC ID {:?}. CS 0x{:x}, DS 0x{:x}",
              core!().id, core!().apic_id(), cs, ds);
 
     cpu::halt();
