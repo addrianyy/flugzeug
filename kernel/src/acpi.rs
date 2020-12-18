@@ -222,16 +222,16 @@ pub unsafe fn initialize() {
         }
     }
 
-    if let Some(apics) = &apics {
-        println!("Found {} APICs on the system.", apics.len());
-    }
-
     let current_apic_id            = core!().apic_id().unwrap();
     let ap_entrypoint: Option<u64> = core!().boot_block.ap_entrypoint.lock().clone();
 
     if ap_entrypoint.is_none() {
         println!("WARNING: Bootloader hasn't provivided realmode AP \
                  entrypoint so APs won't be laucnhed.");
+
+        if let Some(apics) = &apics {
+            println!("Found {} APICs on the system.", apics.len());
+        }
 
         apics = None;
     }
@@ -295,6 +295,8 @@ pub unsafe fn initialize() {
 
         // Wait for the core to become online. Bootloader is not thread safe so there can
         // be only one launching AP at a time.
-        while core_state(apic_id) != CoreState::Online {}
+        while core_state(apic_id) != CoreState::Online {
+            cpu::pause();
+        }
     }
 }

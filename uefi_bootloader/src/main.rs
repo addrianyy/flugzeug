@@ -108,12 +108,8 @@ impl APEntry {
             .expect("Failed to allocate AP entrypoint.");
 
         let code_address = (area_address as usize) + STACK_SIZE;
-
-        println!("Allocated AP launch area at 0x{:x}. Entrypoint at 0x{:x}.",
-                 area_address, code_address);
-
-        let code_buffer = core::slice::from_raw_parts_mut(code_address as *mut u8,
-                                                          entrypoint_code.len());
+        let code_buffer  = core::slice::from_raw_parts_mut(code_address as *mut u8,
+                                                           entrypoint_code.len());
 
         code_buffer.copy_from_slice(entrypoint_code);
 

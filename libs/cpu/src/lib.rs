@@ -115,3 +115,9 @@ pub fn halt() -> ! {
         }
     }
 }
+
+pub fn pause() {
+    unsafe {
+        asm!("pause");
+    }
+}
