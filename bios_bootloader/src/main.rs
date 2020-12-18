@@ -429,8 +429,6 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
         serial::initialize();
         mm::initialize();
 
-        println!("Entered bootloader");
-
         // Find ACPI tables on the system if they weren't found before.
         if !LOCATED_ACPI.load(Ordering::Relaxed) {
             locate_acpi();
