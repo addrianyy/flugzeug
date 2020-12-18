@@ -226,8 +226,8 @@ pub unsafe fn initialize() {
         println!("Found {} APICs on the system.", apics.len());
     }
 
-    let current_apic_id = core!().apic_id().unwrap();
-    let ap_entrypoint   = core!().boot_block.ap_entrypoint.lock().clone();
+    let current_apic_id            = core!().apic_id().unwrap();
+    let ap_entrypoint: Option<u64> = core!().boot_block.ap_entrypoint.lock().clone();
 
     if ap_entrypoint.is_none() {
         println!("WARNING: Bootloader hasn't provivided realmode AP \

@@ -10,10 +10,12 @@ mod bios;
 mod mm;
 
 use core::convert::TryInto;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
-                 KERNEL_STACK_BASE, KERNEL_STACK_SIZE, KERNEL_STACK_PADDING};
+                 KERNEL_STACK_BASE, KERNEL_STACK_SIZE, KERNEL_STACK_PADDING, AcpiTables};
 
+use acpi::{Rsdp, RsdpExtended};
 use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE};
 use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness, SegmentType, Machine};
@@ -36,6 +38,8 @@ static KERNEL_ENTRY_DATA: Lock<Option<KernelEntryData>> = Lock::new(None);
 /// Address of the next stack used to enter the kernel. Each CPU takes address from here
 /// and advances the value. There is no 64 bit atomic value in 32 bit mode so `Lock` is used.
 static NEXT_STACK_ADDRESS: Lock<u64> = Lock::new(KERNEL_STACK_BASE);
+
+static LOCATED_ACPI: AtomicBool = AtomicBool::new(false);
 
 #[derive(Copy, Clone)]
 struct KernelEntryData {
@@ -277,6 +281,8 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         let page_size = page_type as u64;
         let page_mask = page_size - 1;
 
+        *BOOT_BLOCK.physical_map_page_size.lock() = Some(page_size.try_into().unwrap());
+
         // Make sure physical region address and size are properly aligned for used page type.
         assert!(KERNEL_PHYSICAL_REGION_BASE & page_mask == 0,
                 "KERNEL_PHYSICAL_REGION_BASE is not aligned.");
@@ -333,6 +339,83 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     (entry_data, rsp)
 }
 
+unsafe fn locate_acpi() {
+    use core::ptr::read_unaligned;
+
+    let mut tables = AcpiTables {
+        rsdt: None,
+        xsdt: None,
+    };
+
+    // Get the address of the EBDA from the BDA.
+    let ebda = read_unaligned(0x40e as *const u16) as usize;
+
+    // Regions that we need to scan for the RSDP.
+    let regions = [
+        // First 1K of the EBDA.
+        (ebda, ebda + 1024),
+
+        // Constant range specified by ACPI specification.
+        (0xe0000, 0xfffff),
+    ];
+
+    for &(start, end) in &regions {
+        // 16 byte align the start address upwards.
+        let start = (start + 0xf) & !0xf;
+
+        // 16 byte align the end address downwards.
+        let end = end & !0xf;
+
+        // Go through every 16 byte aligned address in the current region.
+        for phys_addr in (start..end).step_by(16) {
+            // Read the RSDP structure.
+            let rsdp: Rsdp = read_unaligned(phys_addr as *const Rsdp);
+
+            // Make sure that the RSDP signature matches.
+            if &rsdp.signature != b"RSD PTR " {
+                continue;
+            }
+
+            // Get the RSDP raw bytes.
+            let raw_bytes = read_unaligned(phys_addr as *const [u8; core::mem::size_of::<Rsdp>()]);
+
+            // Make sure that the RSDP checksum is valid.
+            let checksum = raw_bytes.iter().fold(0u8, |acc, v| acc.wrapping_add(*v));
+            if  checksum != 0 {
+                continue;
+            }
+
+            if rsdp.revision > 0 {
+                type ExtendedArray = [u8; core::mem::size_of::<RsdpExtended>()];
+
+                // Get the extended RSDP raw bytes.
+                let raw_bytes = read_unaligned(phys_addr as *const ExtendedArray);
+                let extended  = read_unaligned(phys_addr as *const RsdpExtended);
+
+                // Make sure that the extended RSDP checksum is valid.
+                let checksum = raw_bytes.iter().fold(0u8, |acc, v| acc.wrapping_add(*v));
+                if  checksum != 0 {
+                    continue;
+                }
+
+                tables.xsdt = Some(extended.xsdt_addr as u64);
+            }
+
+            tables.rsdt = Some(rsdp.rsdt_addr as u64);
+
+            // All checks succedded, we have found the ACPI tables.
+
+            LOCATED_ACPI.store(true, Ordering::Relaxed);
+
+            *BOOT_BLOCK.acpi_tables.lock() = tables;
+
+            return;
+        }
+    }
+
+    panic!("Failed to find ACPI tables on the system.");
+}
+
 #[no_mangle]
 extern "C" fn _start(boot_disk_data: &BootDiskData,
                      boot_disk_descriptor: &BootDiskDescriptor) -> ! {
@@ -345,7 +428,22 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
     unsafe {
         serial::initialize();
         mm::initialize();
+
+        println!("Entered bootloader");
+
+        // Find ACPI tables on the system if they weren't found before.
+        if !LOCATED_ACPI.load(Ordering::Relaxed) {
+            locate_acpi();
+        }
     }
+
+    // Set AP entrypoint so kernel will be able to launch other processors.
+    let mut ap_entrypoint = BOOT_BLOCK.ap_entrypoint.lock();
+    if ap_entrypoint.is_none() {
+        *ap_entrypoint = Some(0x8000);
+    }
+
+    drop(ap_entrypoint);
 
     // Load and map kernel if required. Also allocate a unique stack for this core.
     let (entry_data, rsp) = setup_kernel(boot_disk_data, boot_disk_descriptor);
