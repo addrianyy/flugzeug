@@ -7,6 +7,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
+name = "bdd"
+version = "0.1.0"
+
+[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -38,6 +42,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "elfparse"
+version = "0.1.0"
+
+[[package]]
 name = "fatfs"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -53,6 +61,8 @@ dependencies = [
 name = "flugzeug"
 version = "0.1.0"
 dependencies = [
+ "bdd",
+ "elfparse",
  "fatfs",
 ]
 

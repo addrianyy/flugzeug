@@ -19,22 +19,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bootloader"
-version = "0.1.0"
-dependencies = [
- "acpi",
- "asmlink",
- "boot_block",
- "cpu",
- "elfparse",
- "libc_routines",
- "lock",
- "page_table",
- "rangeset",
- "serial_port",
-]
-
-[[package]]
 name = "cpu"
 version = "0.1.0"
 
@@ -66,4 +50,20 @@ name = "serial_port"
 version = "0.1.0"
 dependencies = [
  "cpu",
+]
+
+[[package]]
+name = "uefi_bootloader"
+version = "0.1.0"
+dependencies = [
+ "acpi",
+ "asmlink",
+ "boot_block",
+ "cpu",
+ "elfparse",
+ "libc_routines",
+ "lock",
+ "page_table",
+ "rangeset",
+ "serial_port",
 ]

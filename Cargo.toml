@@ -5,4 +5,6 @@ authors = ["addrianyy <adrianvpl@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+elfparse = { path = "libs/elfparse" }
+bdd = { path = "libs/bdd" }
 fatfs = "0.3"

@@ -9,17 +9,7 @@ name = "bdd"
 version = "0.1.0"
 
 [[package]]
-name = "boot_block"
-version = "0.1.0"
-dependencies = [
- "lock",
- "page_table",
- "rangeset",
- "serial_port",
-]
-
-[[package]]
-name = "bootloader"
+name = "bios_bootloader"
 version = "0.1.0"
 dependencies = [
  "asmlink",
@@ -28,6 +18,16 @@ dependencies = [
  "cpu",
  "elfparse",
  "libc_routines",
+ "lock",
+ "page_table",
+ "rangeset",
+ "serial_port",
+]
+
+[[package]]
+name = "boot_block"
+version = "0.1.0"
+dependencies = [
  "lock",
  "page_table",
  "rangeset",
