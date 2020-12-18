@@ -130,10 +130,13 @@ impl RangeSet {
         }
     }
 
-    /// Move a region that satisfies requested `size` and `align` out of the set and return it.
-    /// If there are many calls to this function with different `size` and `align` then `RangeSet`
-    /// may get very fragmented.
     pub fn allocate(&mut self, size: u64, align: u64) -> Option<usize> {
+        self.allocate_limited(size, align, None)
+    }
+
+    pub fn allocate_limited(&mut self, size: u64, align: u64, max_address: Option<u64>)
+        -> Option<usize> 
+    {
         // Zero-sized allocations are not allowed.
         if size == 0 {
             return None;
@@ -146,6 +149,9 @@ impl RangeSet {
 
         // Calculate alignment mask, this can be done because alignment is always power of two.
         let align_mask = align - 1;
+
+        let max_address = max_address.unwrap_or(usize::MAX as u64);
+        let max_address = max_address.min(usize::MAX as u64);
 
         let mut allocation: Option<(u64, u32, u64, u64)> = None;
 
@@ -167,7 +173,7 @@ impl RangeSet {
 
             // Make sure that this memory can be accessed by the processor in it's current state.
             // This library will be used by both 32 bit and 64 bit code.
-            if actual_end > usize::MAX as u64 {
+            if actual_end > max_address {
                 continue;
             }
 

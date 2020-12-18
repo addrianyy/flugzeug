@@ -318,22 +318,18 @@ fn alloc_error_handler(layout: Layout) -> ! {
 
 /// Make physical region non-executable. It can be done only after all APs are launched.
 pub unsafe fn enable_nx_on_physical_region() {
-    // This code is roughly the same as in bootloader.
+    let page_size = core!().boot_block.physical_map_page_size.lock()
+        .expect("Bootloader didn't fill in `physical_map_page_size`.");
 
-    let features = cpu::get_features();
+    const PAGE_2M: u64 = 2 * 1024 * 1024;
+    const PAGE_1G: u64 = 1 * 1024 * 1024 * 1024;
 
-    // Get the page type used by bootloader to create a physical memory map. If types don't match
-    // mapping will fail.
-    let page_type = if features.page1g {
-        PageType::Page1G
-    } else if features.page2m {
-        PageType::Page2M
-    } else {
-        // Bootloader shouldn't map physical memory using 4K pages.
-        unreachable!()
+    let page_type = match page_size {
+        PAGE_2M  => PageType::Page2M,
+        PAGE_1G  => PageType::Page1G,
+        _        => panic!("Bootloader set invalid physical map page size {:x}.",
+                           page_size),
     };
-
-    let page_size = page_type as u64;
 
     let mut page_table = core!().boot_block.page_table.lock();
     let page_table     = page_table.as_mut().unwrap();

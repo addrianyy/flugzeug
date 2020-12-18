@@ -1,147 +1,132 @@
-use core::alloc::{GlobalAlloc, Layout};
 use core::convert::TryInto;
+use core::alloc::Layout;
 
 use rangeset::{RangeSet, Range};
 use page_table::{PhysMem, PhysAddr};
-use crate::BOOT_BLOCK;
-use crate::bios;
+use crate::{BOOT_BLOCK, efi};
 
-pub struct GlobalAllocator;
+unsafe fn translate(phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
+    // We don't use paging in the bootloader so physcial address == virtual address.
+    // Just make sure that address fits in pointer and region doesn't overflow.
+    
+    let phys_addr: usize = phys_addr.0.try_into().ok()?;
+    let _phys_end: usize = phys_addr.checked_add(size.checked_sub(1)?)?;
 
-unsafe impl GlobalAlloc for GlobalAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        BOOT_BLOCK.free_memory.lock().as_mut().and_then(|memory| {
-            memory.allocate(layout.size() as u64, layout.align() as u64)
-        }).unwrap_or(0) as *mut u8
-    }
+    Some(phys_addr as *mut u8)
+}
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        BOOT_BLOCK.free_memory.lock().as_mut().and_then(|memory| {
-            // Create an inclusive range for this allocation and give it back to the
-            // free memory set.
+fn alloc_phys(layout: Layout, max_address: Option<usize>) -> Option<PhysAddr> {
+    let mut free_memory = BOOT_BLOCK.free_memory.lock();
+    let free_memory     = free_memory.as_mut().unwrap();
 
-            let start = ptr as u64;
-            let end   = start.checked_add(layout.size().checked_sub(1)? as u64)?;
-
-            memory.insert(Range { start, end });
-
-            Some(())
-        }).expect("Failed to free memory.");
-    }
+    free_memory.allocate_limited(layout.size() as u64, layout.align() as u64,
+                                 max_address.map(|m| m as u64))
+        .map(|addr| PhysAddr(addr as u64))
 }
 
 pub struct PhysicalMemory;
 
 impl PhysMem for PhysicalMemory {
     unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
-        // We don't use paging in the bootloader so physcial address == virtual address.
-        // Just make sure that address fits in pointer and region doesn't overflow.
-        
-        let phys_addr: usize = phys_addr.0.try_into().ok()?;
-        let _phys_end: usize = phys_addr.checked_add(size.checked_sub(1)?)?;
-
-        Some(phys_addr as *mut u8)
+        translate(phys_addr, size)
     }
 
     fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
-        let mut free_memory = BOOT_BLOCK.free_memory.lock();
-        let free_memory     = free_memory.as_mut().unwrap();
-
-        free_memory.allocate(layout.size() as u64, layout.align() as u64)
-            .map(|addr| PhysAddr(addr as u64))
+        alloc_phys(layout, None)
     }
 }
 
-#[global_allocator]
-static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
+pub struct PhysicalMemory32;
 
-#[alloc_error_handler]
-fn alloc_error_handler(layout: Layout) -> ! {
-    panic!("Allocation of memory with layout {:?} failed!", layout);
+impl PhysMem for PhysicalMemory32 {
+    unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
+        translate(phys_addr, size)
+    }
+
+    fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
+        // Make sure we never allocate > 4GB memory.
+        alloc_phys(layout, Some(0xffff_ffff))
+    }
 }
 
-pub unsafe fn initialize() {
+pub unsafe fn initialize_and_exit_boot_services(image_handle: usize,
+                                                system_table: *mut efi::EfiSystemTable) {
     let mut free_memory = BOOT_BLOCK.free_memory.lock();
     let mut memory      = RangeSet::new();
 
-    // Skip initialization if the memory manager was already initialized by other CPU.
-    if free_memory.is_some() {
-        return;
-    }
+    assert!(free_memory.is_none(), "Free memory list was already initialized.");
 
-    // Do two passes because some BIOSes are broken.
-    for &cleanup_pass in &[false, true] {
-        let mut sequence = 0;
+    let boot_services = &mut *((*system_table).boot_services);
+    let mut tries     = 0;
 
-        loop {
-            #[repr(C)]
-            #[derive(Default, Debug)]
-            struct E820Entry {
-                base: u64,
-                size: u64,
-                typ:  u32,
-                acpi: u32,
-            }
+    let map_key = loop {
+        let mut map_size     = 0;
+        let mut map_key      = 0;
+        let mut desc_size    = 0;
+        let mut desc_version = 0;
+        let status = (boot_services.get_memory_map)(&mut map_size, core::ptr::null_mut(),
+                                                    &mut map_key, &mut desc_size,
+                                                    &mut desc_version);
 
-            // Some BIOSes won't set ACPI field so we need to make it valid in the beginning.
-            let mut entry = E820Entry {
-                acpi: 1,
-                ..Default::default()
-            };
+        assert_eq!(status, 0x8000000000000005, "Status is not BUFFER_TOO_SMALL.");
 
-            // Make sure that the entry is accessible by BIOS.
-            assert!((&entry as *const _ as usize) < 0x10000,
-                    "Entry is in high memory, BIOS won't be able to access it.");
+        map_size *= 2;
 
-            // Make sure that size matches excpected one.
-            assert!(core::mem::size_of::<E820Entry>() == 24, "E820 entry has invalid size.");
+        let mut pool = core::ptr::null_mut();
+        let status   = (boot_services.allocate_pool)(efi::EFI_LOADER_DATA, map_size,
+                                                        &mut pool);
 
-            // Load all required magic values for this BIOS service.
-            let mut regs = bios::RegisterState {
-                eax: 0xe820,
-                ebx: sequence,
-                ecx: core::mem::size_of::<E820Entry>() as u32,
-                edx: u32::from_be_bytes(*b"SMAP"),
-                edi: &mut entry as *mut _ as u32,
-                ..Default::default()
-            };
+        assert_eq!(status, 0, "Allocating memory pool failed.");
 
-            bios::interrupt(0x15, &mut regs);
+        let status = (boot_services.get_memory_map)(&mut map_size, pool as *mut _,
+                                                    &mut map_key, &mut desc_size,
+                                                    &mut desc_version);
 
-            // Update current sequence so BIOS will know which entry to report
-            // in the next iteration.
-            sequence = regs.ebx;
+        if status != 0 {
+            assert!(tries < 5, "Too many failed tries to get memory pool.");
 
-            // Consider this entry valid only if ACPI bit 0 is set and range is not empty.
-            if entry.acpi & 1 != 0 && entry.size > 0 {
-                // Create inclusive range required by `RangeSet`.
-                let start = entry.base;
-                let end   = entry.base.checked_add(entry.size - 1)
-                    .expect("E820 region overflowed.");
-                let range = Range { start, end };
+            tries += 1;
 
-                let free = entry.typ == 1;
+            assert_eq!((boot_services.free_pool)(pool), 0, "Freeing pool failed.");
+        } else {
+            assert!(desc_size >= core::mem::size_of::<efi::EfiMemoryDescriptor>(),
+                    "Descriptor size is lower than our struct size.");
+            assert!(map_size % desc_size == 0,
+                    "Map size is not divisible by descriptor size.");
 
-                // First pass will add all free memory to the list.
-                // Second pass will remove all non-free memory from the list.
-                // Some BIOSes may report that region is free and non-free at the
-                // same time, we don't want to use such regions.
-                if free && !cleanup_pass {
+            let entries = map_size / desc_size;
+
+            for index in 0..entries {
+                let desc_ptr = (pool as usize + index * desc_size)
+                    as *const efi::EfiMemoryDescriptor;
+
+                let desc   = &*desc_ptr;
+                let usable = matches!(desc.typ,
+                                        efi::EFI_LOADER_CODE |
+                                        efi::EFI_LOADER_DATA |
+                                        efi::EFI_BOOT_SERVICES_CODE |
+                                        efi::EFI_BOOT_SERVICES_DATA |
+                                        efi::EFI_CONVENTIONAL_MEMORY);
+
+                if usable {
+                    assert!(desc.pages > 0, "Invalid empty entry.");
+
+                    let range = Range {
+                        start: desc.physical_start,
+                        end:   (desc.physical_start + desc.pages * 4096) - 1,
+                    };
+
                     memory.insert(range);
-                } else if !free && cleanup_pass {
-                    memory.remove(range);
                 }
             }
 
-            // CF set indicates error or end of the list. sequence == 0 indicates end of the list.
-            if regs.eflags & 1 != 0 || sequence == 0 {
-                break;
-            }
+            break map_key;
         }
-    }
+    };
 
-    // Remove first 1MB of memory, we store some data there which we don't want to overwrite.
-    memory.remove(Range { start: 0, end: 1024 * 1024 - 1 });
+    let status = (boot_services.exit_boot_services)(image_handle, map_key);
+
+    assert_eq!(status, 0, "Failed to exit boot services.");
 
     *free_memory = Some(memory);
 }

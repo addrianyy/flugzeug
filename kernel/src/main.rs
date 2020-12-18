@@ -25,6 +25,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     unsafe {
         // Initialize crucial kernel per-core components.
         core_locals::initialize(boot_block);
+
         interrupts::initialize();
         apic::initialize();
 
@@ -43,7 +44,16 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         }
     }
 
-    println!("Hello from kernel! Core ID: {}. APIC ID {:?}.", core!().id, core!().apic_id());
+    let cs: u16;
+    let ds: u16;
+
+    unsafe {
+        asm!("mov ax, cs", out("ax") cs);
+        asm!("mov ax, ds", out("ax") ds);
+    }
+
+    println!("Hello from kernel! Core ID: {}. APIC ID {:?}. CS 0x{:x}, DS 0x{:x}",
+             core!().id, core!().apic_id(), cs, ds);
 
     cpu::halt();
 }

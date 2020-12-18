@@ -20,6 +20,13 @@ pub const KERNEL_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 pub const KERNEL_HEAP_BASE:    u64 = 0xffff_8000_0000_0000;
 pub const KERNEL_HEAP_PADDING: u64 = 4096;
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct AcpiTables {
+    pub rsdt: Option<u64>,
+    pub xsdt: Option<u64>,
+}
+
 /// Data shared between the bootloader and the kernel. Allows for concurrent access.
 #[repr(C)]
 pub struct BootBlock {
@@ -35,16 +42,26 @@ pub struct BootBlock {
 
     /// Page tables created by the bootloader and used by the kernel.
     pub page_table: Lock<Option<PageTable>>,
+
+    pub physical_map_page_size: Lock<Option<u64>>,
+    pub ap_entrypoint:          Lock<Option<u64>>,
+    pub acpi_tables:            Lock<AcpiTables>,
 }
 
 impl BootBlock {
     /// Create an empty `BootBlock` and cache the size of it in current processor mode.
     pub const fn new() -> Self {
         Self {
-            size:        core::mem::size_of::<Self>() as u64,
-            free_memory: Lock::new(None),
-            serial_port: Lock::new(None),
-            page_table:  Lock::new(None),
+            size:                   core::mem::size_of::<Self>() as u64,
+            free_memory:            Lock::new(None),
+            serial_port:            Lock::new(None),
+            page_table:             Lock::new(None),
+            physical_map_page_size: Lock::new(None),
+            ap_entrypoint:          Lock::new(None),
+            acpi_tables:            Lock::new(AcpiTables {
+                rsdt: None,
+                xsdt: None,
+            }),
         }
     }
 }

@@ -1,12 +1,12 @@
 #![no_std]
 #![no_main]
-#![feature(abi_efiapi, panic_info_message, asm)]
+#![feature(panic_info_message, alloc_error_handler)]
 
-extern crate libc_routines;
+extern crate alloc;
 
 #[macro_use] mod serial;
 mod panic;
-mod efi;
+mod bios;
 mod mm;
 
 use core::convert::TryInto;
@@ -15,8 +15,10 @@ use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_
                  KERNEL_STACK_BASE, KERNEL_STACK_SIZE, KERNEL_STACK_PADDING};
 
 use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE};
+use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness, SegmentType, Machine};
-use mm::{PhysicalMemory, PhysicalMemory32};
+use bios::RegisterState;
+use mm::PhysicalMemory;
 use lock::Lock;
 
 // Bootloader is not thread safe. There can be only one instance of it running at a time.
@@ -26,12 +28,6 @@ use lock::Lock;
 /// exactly the same shape in 32 bit and 64 bit mode. It allows for concurrent memory
 /// allocation and modification and serial port interface.
 pub static BOOT_BLOCK: BootBlock = BootBlock::new();
-
-/// ELF image of the kernel.
-const KERNEL: &[u8] = include_bytes!(env!("FLUGZEUG_KERNEL_PATH"));
-
-/// Realmode AP entrypoint.
-const AP_ENTRYPOINT: &[u8] = include_bytes!(env!("FLUGZEUG_AP_ENTRYPOINT_PATH"));
 
 /// Data required to enter the kernel. If it is `None` then kernel wasn't loaded
 /// from disk yet.
@@ -44,9 +40,71 @@ static NEXT_STACK_ADDRESS: Lock<u64> = Lock::new(KERNEL_STACK_BASE);
 #[derive(Copy, Clone)]
 struct KernelEntryData {
     entrypoint:     u64,
-    kernel_cr3:     u64,
-    trampoline_cr3: u64,
-    gdt:            u64,
+    kernel_cr3:     u32,
+    trampoline_cr3: u32,
+}
+
+fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
+    // Make a temporary buffer which is on the stack in low memory address.
+    let mut temp_buffer = [0u8; 512];
+
+    // Make sure that the temporary buffer is accessible for BIOS.
+    assert!((temp_buffer.as_ptr() as usize).checked_add(temp_buffer.len()).unwrap() < 0x10000,
+            "Temporary buffer for reading sectors is inaccesible for BIOS.");
+
+    for tries in 0..5 {
+        // If we have failed before, restart boot disk system.
+        if tries > 0 {
+            let mut regs = RegisterState {
+                eax: 0,
+                edx: boot_disk_data.disk_number as u32,
+                ..Default::default()
+            };
+
+            unsafe { bios::interrupt(0x13, &mut regs); }
+            
+            assert!(regs.eflags & 1 == 0, "Reseting boot disk system failed.");
+        }
+
+        // Convert LBA to CHS using drive geometry from BIOS.
+        let cylinder = lba / boot_disk_data.sectors_per_cylinder;
+        let head     = (lba / boot_disk_data.sectors_per_track) % 
+                        boot_disk_data.heads_per_cylinder;
+        let sector   = lba % boot_disk_data.sectors_per_track + 1;
+
+        // Setup proper register state to perform the read.
+
+        let al: u8 = 1;
+        let ah: u8 = 2;
+
+        let cl: u8 = (sector as u8) | ((cylinder >> 2) & 0xc0) as u8;
+        let ch: u8 = cylinder as u8;
+
+        let dl: u8 = boot_disk_data.disk_number;
+        let dh: u8 = head as u8;
+
+        // Ask BIOS to read one sector.
+        let mut regs = RegisterState {
+            eax: ((ah as u32) << 8) | ((al as u32) << 0),
+            ecx: ((ch as u32) << 8) | ((cl as u32) << 0),
+            edx: ((dh as u32) << 8) | ((dl as u32) << 0),
+            ebx: temp_buffer.as_mut_ptr() as u32,
+            ..Default::default()
+        };
+
+        unsafe { bios::interrupt(0x13, &mut regs); }
+
+        if regs.eax & 0xff == 1 && regs.eflags & 1 == 0 {
+            // We have successfuly read 1 sector from disk. Now copy it to the actual destination.
+            buffer.copy_from_slice(&temp_buffer);
+
+            return;
+        }
+
+        println!("Retrying disk read...");
+    }
+
+    panic!("Failed to read sector from disk at LBA {}.", lba);
 }
 
 /// Creates a unique kernel stack required for entering the kernel.
@@ -72,113 +130,10 @@ fn create_kernel_stack() -> u64 {
     stack.0
 }
 
-struct APEntry {
-    code_address: usize,
-    code_buffer:  &'static mut [u8],
-}
-
-impl APEntry {
-    unsafe fn new() -> Self {
-        if false {
-            // Reserve memory to test segment handling in AP entrypoint.
-            // Testing only.
-            BOOT_BLOCK.free_memory
-                .lock()
-                .as_mut()
-                .unwrap()
-                .allocate_limited(0x11000, 0x1000, Some(0x100000 - 1))
-                .expect("Failed to allocate testing area.");
-        }
-
-        // 16KB of stack. Bootloader needs a lot of stack because it uses `RangeSet`.
-        const STACK_SIZE: usize = 16 * 1024;
-
-        let entrypoint_code = AP_ENTRYPOINT;
-        let code_size       = (entrypoint_code.len() + 0xfff) & !0xfff;
-        let area_size       = code_size + STACK_SIZE;
-
-        assert!(area_size & 0xfff == 0, "AP entrypoint area size is not page aligned.");
-
-        // Allocate AP area in low memory that is accesible by 16 bit code.
-        let area_address = BOOT_BLOCK.free_memory
-            .lock()
-            .as_mut()
-            .unwrap()
-            .allocate_limited(area_size as u64, 0x1000, Some(0x100000 - 1))
-            .expect("Failed to allocate AP entrypoint.");
-
-        let code_address = (area_address as usize) + STACK_SIZE;
-
-        println!("Allocated AP launch area at 0x{:x}. Entrypoint at 0x{:x}.",
-                 area_address, code_address);
-
-        let code_buffer = core::slice::from_raw_parts_mut(code_address as *mut u8,
-                                                          entrypoint_code.len());
-
-        code_buffer.copy_from_slice(entrypoint_code);
-
-        Self {
-            code_address,
-            code_buffer,
-        }
-    }
-
-    unsafe fn finalize_and_register(&mut self, trampoline_cr3: u64) {
-        let code_buffer = &mut self.code_buffer;
-
-        let code_address:   u32 = self.code_address.try_into().expect("AP entrypoint > 4GB");
-        let trampoline_cr3: u32 = trampoline_cr3.try_into().expect("Trampoline CR3 > 4GB");
-
-        // Make sure that AP entrypoint starts with:
-        //   mov eax, 0xaabbccdd
-        //   jmp skip
-        //
-        // AP entrypoint will expect us to change 0xaabbccdd to its own address.
-        assert!(&code_buffer[..6 + 1] == &[0x66, 0xb8, 0xdd, 0xcc, 0xbb, 0xaa, 0xeb]);
-
-        // Replace imm in `mov` to code base address.
-        code_buffer[2..6].copy_from_slice(&code_address.to_le_bytes());
-
-        // Calculate jump target relative to `code_address`.
-        let jmp_target_offset = (code_buffer[6 + 1] + 6 + 2) as usize;
-
-        // 6 bytes for mov and 2 bytes for jmp.
-        let mut current_offset = 6 + 2;
-        let mut current_buffer = &mut code_buffer[current_offset..];
-
-        macro_rules! write {
-            ($value: expr) => {{
-                let value: u64 = $value;
-                let bytes      = value.to_le_bytes();
-
-                current_buffer[..bytes.len()].copy_from_slice(&bytes);
-                current_offset += bytes.len();
-
-                #[allow(unused)]
-                {
-                    current_buffer = &mut current_buffer[bytes.len()..];
-                }
-            }}
-        }
-
-        // trampoline_cr3:        dq 0
-        write!(trampoline_cr3 as u64);
-
-        // bootloader_entrypoint: dq 0
-        write!(efi_main as *const () as u64);
-
-        // Make sure we have written expected amount of bytes.
-        assert_eq!(current_offset, jmp_target_offset,
-                   "Data area in AP entrypoint was corrupted.");
-
-        // Set AP entrypoint address so it will be used by the kernel.
-        *BOOT_BLOCK.ap_entrypoint.lock() = Some(code_address as u64);
-    }
-}
-
 /// Allocates a unique stack and gets all data required to enter the kernel.
 /// If kernel isn't already in memory, it will be read from disk and mapped.
-fn setup_kernel() -> (KernelEntryData, u64) {
+fn setup_kernel(boot_disk_data: &BootDiskData,
+                boot_disk_descriptor: &BootDiskDescriptor) -> (KernelEntryData, u64) {
     if let Some(entry_data) = *KERNEL_ENTRY_DATA.lock() {
         // We are currently launching AP and the kernel has been already loaded and mapped.
         // We just need a new stack to enter the kernel.
@@ -189,23 +144,40 @@ fn setup_kernel() -> (KernelEntryData, u64) {
         return (entry_data, rsp);
     }
 
-    // AP entrypoint needs to be in low memory so we must create it before doing any other
-    // allocations.
-    let mut ap_entrypoint = unsafe { APEntry::new() };
+    // Make sure that the BDD is valid.
+    assert!(boot_disk_descriptor.signature == bdd::SIGNATURE, "BDD has invalid signature.");
+
+    // Get information about kernel location on disk from BDD.
+    let kernel_lba      = boot_disk_descriptor.kernel_lba;
+    let kernel_sectors  = boot_disk_descriptor.kernel_sectors;
+    let kernel_checksum = boot_disk_descriptor.kernel_checksum;
+
+    // Allocate a buffer that will hold whole kernel ELF image.
+    let mut kernel = alloc::vec![0; (kernel_sectors as usize) * 512];
+
+    // Read the kernel.
+    for sector in 0..kernel_sectors {
+        let buffer = &mut kernel[(sector as usize) * 512..][..512];
+
+        // Read one sector of the kernel to the destination kernel buffer.
+        read_sector(boot_disk_data, kernel_lba + sector, buffer);
+    }
+
+    // Make sure that loaded kernel matches our expectations.
+    assert!(bdd::checksum(&kernel) == kernel_checksum, "Loaded kernel has invalid checksum.");
 
     // Parse the kernel ELF file and make sure that it is 64 bit.
-    let elf = Elf::parse(&KERNEL).expect("Failed to parse kernel ELF file.");
+    let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
     assert!(elf.machine() == Machine::Amd64, "Loaded kernel is AMD64 binary.");
-
-    // Allocate a page table that will be used when transitioning to the kernel.
-    // It will be also used by AP entrypoint so it needs to be in address < 4GB.
-    let mut trampoline_page_table = PageTable::new(&mut PhysicalMemory32)
-        .expect("Failed to allocate trampoline page table.");
 
     // Allocate a page table that will be used by the kernel.
     let mut kernel_page_table = PageTable::new(&mut PhysicalMemory)
         .expect("Failed to allocate kernel page table.");
+
+    // Allocate a page table that will be used when transitioning to the kernel.
+    let mut trampoline_page_table = PageTable::new(&mut PhysicalMemory)
+        .expect("Failed to allocate trampoline page table.");
 
     // Map kernel to the virtual memory.
     elf.segments(|segment| {
@@ -263,25 +235,23 @@ fn setup_kernel() -> (KernelEntryData, u64) {
     //    to RIP in order to use kernel-valid address.
     // 3. Switch to the actual kernel page tables, switch stack and jump to the kernel.
 
-    // We hope that 4GB mapping is enough. TODO: Fix this.
-    const TRAMPOLINE_PHYSICAL_REGION_SIZE: u64 = 4 * 1024 * 1024 * 1024;
-
-    let features = cpu::get_features();
+    // We will only execute bootloader code using trampoline page tables. Bootloader
+    // has to be loaded in a low, smaller than 1MB address. Therafore we just need to map
+    // 1MB of memory.
+    const TRAMPOLINE_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024;
 
     assert!(KERNEL_PHYSICAL_REGION_SIZE >= TRAMPOLINE_PHYSICAL_REGION_SIZE);
-    assert!(features.page2m, "CPU needs to support at least 2M pages.");
 
     // Setup trampoline page table.
-    for phys_addr in (0..TRAMPOLINE_PHYSICAL_REGION_SIZE).step_by(2 * 1024 * 1024) {
+    for phys_addr in (0..TRAMPOLINE_PHYSICAL_REGION_SIZE).step_by(4096) {
         // Map current `phys_addr` at virtual address `phys_addr` and virtual address
         // `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`. All this memory will be both
         // writable and executable.
         for &virt_addr in &[VirtAddr(phys_addr),
                             VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE)] {
             unsafe {
-                trampoline_page_table.map_raw(&mut PhysicalMemory, virt_addr, PageType::Page2M,
-                                              phys_addr | PAGE_WRITE | PAGE_PRESENT | PAGE_SIZE,
-                                              true, false)
+                trampoline_page_table.map_raw(&mut PhysicalMemory, virt_addr, PageType::Page4K,
+                                              phys_addr | PAGE_WRITE | PAGE_PRESENT, true, false)
                     .expect("Failed to map physical region in the trampoline page table.");
             }
         }
@@ -289,20 +259,23 @@ fn setup_kernel() -> (KernelEntryData, u64) {
 
     // Create linear physical memory map used by kernel at address.
     {
+        let features = cpu::get_features();
+
         // We will map a lot of memory so use the largest possible page type.
         let page_type = if features.page1g {
             PageType::Page1G
-        } else {
+        } else if features.page2m {
             println!("WARNING: CPU doesn't support 1G pages, mapping physical \
                      region may take a while.");
 
             PageType::Page2M
+        } else {
+            // Mapping using 4K pages would take too long and would waste too much memory.
+            panic!("CPU needs to support at least 2M pages.")
         };
 
         let page_size = page_type as u64;
         let page_mask = page_size - 1;
-
-        *BOOT_BLOCK.physical_map_page_size.lock() = Some(page_size.try_into().unwrap());
 
         // Make sure physical region address and size are properly aligned for used page type.
         assert!(KERNEL_PHYSICAL_REGION_BASE & page_mask == 0,
@@ -335,26 +308,18 @@ fn setup_kernel() -> (KernelEntryData, u64) {
         }
     }
 
-    let kernel_cr3     = kernel_page_table.table().0;
-    let trampoline_cr3 = trampoline_page_table.table().0;
-    let gdt            = BOOT_BLOCK.free_memory.lock().as_mut()
-        .unwrap()
-        .allocate(4096, 8)
-        .expect("Failed to allocate GDT.");
+    // Get physical addresses of page tables and make sure they fit in 32 bit integer.
+    let kernel_cr3:     u32 = kernel_page_table.table().0.try_into().unwrap();
+    let trampoline_cr3: u32 = trampoline_page_table.table().0.try_into().unwrap();
 
     // Cache page tables which will be used by all APs.
     *BOOT_BLOCK.page_table.lock() = Some(kernel_page_table);
 
-    unsafe {
-        ap_entrypoint.finalize_and_register(trampoline_cr3);
-    }
-
-    println!("Kernel base is {:x}.", elf.base_address());
-    println!("Kernel entrypoint is {:x}.", elf.entrypoint());
+    println!("Kernel base is {:x}", elf.base_address());
+    println!("Kernel entrypoint is {:x}", elf.entrypoint());
 
     let entry_data = KernelEntryData {
         entrypoint: elf.entrypoint(),
-        gdt:        gdt as u64,
         kernel_cr3,
         trampoline_cr3,
     };
@@ -368,83 +333,32 @@ fn setup_kernel() -> (KernelEntryData, u64) {
     (entry_data, rsp)
 }
 
-unsafe fn locate_acpi(system_table: *mut efi::EfiSystemTable) {
-    use efi::EfiGuid;
-
-    const EFI_ACPI_TABLE_GUID: EfiGuid = EfiGuid(0xeb9d2d30, 0x2d88, 0x11d3,
-                                                 [0x9a, 0x16, 0x0, 0x90,
-                                                  0x27, 0x3f, 0xc1, 0x4d]);
-
-    const EFI_ACPI_20_TABLE_GUID: EfiGuid = EfiGuid(0x8868e871, 0xe4f1, 0x11d3,
-                                                    [0xbc, 0x22, 0x0, 0x80,
-                                                     0xc7, 0x3c, 0x88, 0x81]);
-
-    let configuration_table = {
-        let entry_count = (*system_table).table_entries;
-        let table       = (*system_table).configuration_table;
-
-        core::slice::from_raw_parts(table, entry_count)
-    };
-
-    let mut acpi = boot_block::AcpiTables {
-        rsdt: None,
-        xsdt: None,
-    };
-
-    for entry in configuration_table {
-        match entry.guid {
-            EFI_ACPI_TABLE_GUID => {
-                let table = core::ptr::read_unaligned(entry.table as *const acpi::Rsdp);
-
-                acpi.rsdt = Some(table.rsdt_addr as u64);
-            }
-            EFI_ACPI_20_TABLE_GUID => {
-                let table = core::ptr::read_unaligned(entry.table as *const acpi::RsdpExtended);
-
-                acpi.rsdt = Some(table.descriptor.rsdt_addr as u64);
-                acpi.xsdt = Some(table.xsdt_addr);
-
-                break;
-            }
-            _ => (),
-        }
-    }
-
-    *BOOT_BLOCK.acpi_tables.lock() = acpi;
-}
-
 #[no_mangle]
-extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) -> ! {
-    if KERNEL_ENTRY_DATA.lock().is_none() {
-        // We are executing for the first time and we have EFI services available.
+extern "C" fn _start(boot_disk_data: &BootDiskData,
+                     boot_disk_descriptor: &BootDiskDescriptor) -> ! {
+    // Make sure that LLVM data layout isn't broken.
+    assert!(core::mem::size_of::<u64>() == 8 && core::mem::align_of::<u64>() == 8,
+            "U64 has invalid size/alignment.");
 
-        unsafe {
-            // Get addresses of ACPI tables.
-            locate_acpi(system_table);
-
-            mm::initialize_and_exit_boot_services(image_handle, system_table);
-
-            // Serial should be initialized after we exit boot services.
-            serial::initialize();
-        }
-    } else {
-        // AP entrypoint should pass zeroes here because EFI is unavailable.
-        assert!(image_handle == 0 && system_table == core::ptr::null_mut(),
-                "Invalid arguments passed to the bootloader.");
+    // Initialize crucial bootloader components. This won't do anything if they
+    // were already initialized by other CPU.
+    unsafe {
+        serial::initialize();
+        mm::initialize();
     }
 
     // Load and map kernel if required. Also allocate a unique stack for this core.
-    let (entry_data, rsp) = setup_kernel();
+    let (entry_data, rsp) = setup_kernel(boot_disk_data, boot_disk_descriptor);
 
     extern "C" {
-        fn enter_kernel(entrypoint: u64, rsp: u64, boot_block: u64, kernel_cr3: u64,
-                        trampoline_cr3: u64, physical_region: u64, gdt: u64) -> !;
+        fn enter_kernel(entrypoint: u64, rsp: u64, boot_block: u64, kernel_cr3: u32,
+                        trampoline_cr3: u32, physical_region: u64) -> !;
     }
 
     // Enter the 64 bit kernel!
     unsafe {
         enter_kernel(entry_data.entrypoint, rsp, &BOOT_BLOCK as *const _ as u64,
                      entry_data.kernel_cr3, entry_data.trampoline_cr3,
-                     KERNEL_PHYSICAL_REGION_BASE, entry_data.gdt);
+                     KERNEL_PHYSICAL_REGION_BASE);
     }
 }

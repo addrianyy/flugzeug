@@ -1,51 +1,87 @@
-[bits 32]
+[bits 64]
+[default rel]
 
 section .text
 
 global enter_kernel
 
-; qword [esp + 0x04] - Entrypoint
-; qword [esp + 0x0c] - Stack
-; qword [esp + 0x14] - Boot block
-; dword [esp + 0x1c] - Kernel CR3
-; dword [esp + 0x20] - Trampoline CR3
-; qword [esp + 0x24] - Physical region base
+; Here we can only refer to things via memory operands which can be RIP-relative. Otherwise
+; compiler generates wrong code.
+
+; qword [rsp + 0x08] - Entrypoint
+; qword [rsp + 0x10] - Stack
+; qword [rsp + 0x18] - Boot block
+; dword [rsp + 0x20] - Kernel CR3
+; dword [rsp + 0x28] - Trampoline CR3
+; qword [rsp + 0x30] - Physical region base
+; qword [rsp + 0x38] - Uninitialized GDT
 enter_kernel:
-    ; Load 64 bit GDT.
-    lgdt [gdt_64.r]
+    mov [rsp + 0x8],  rcx
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
 
-    ; Enable LME and NXE.
-    mov ecx, 0xc0000080
-    mov eax, 0x00000900
-    mov edx, 0
-    wrmsr
+    ; Get uninitialized GDT base.
+    mov r10, [rsp + 0x38]
 
-    ; Load trampoline CR3 which maps first 1MB of memory at address 0 (identity map)
-    ; and at address `Physical region base` (linear map).
-    mov eax, [esp + 0x20]
-    mov cr3, eax
+    ; Setup null segment as selector 0.
+    mov rbx, GDT_NULL
+    mov qword [r10 + 0], rbx
 
-    ; Enable some SSE stuff and PAE which is required for long mode.
-    xor eax, eax
-    or  eax, (1 <<  9) ; OSFXSR
-    or  eax, (1 << 10) ; OSXMMEXCPT
-    or  eax, (1 <<  5) ; PAE
-    mov cr4, eax
+    ; Setup code segment at selector 8.
+    mov rbx, GDT_CODE
+    mov qword [r10 + 8], rbx
 
-    ; Enable paging, write protect and some other less important stuff.
-    xor eax, eax
-    or  eax,  (1 <<  0) ; Protected mode enable
-    or  eax,  (1 <<  1) ; Monitor co-processor
-    or  eax,  (1 << 16) ; Write protect
-    or  eax,  (1 << 31) ; Paging enable
-    mov cr0, eax
+    ; Get selector for current CS.
+    xor rax, rax
+    mov ax, cs
+    and rax, ~0b111
 
-    ; Switch CPU to long mode.
-    jmp 0x08:.entry_64
+    ; Setup code segment at selector CS.
+    mov rbx, GDT_CODE
+    mov qword [r10 + rax], rbx
 
-[bits 64]
-.entry_64:
-    ; Reload all segments.
+    ; Zero out all data segments before loading new GDT.
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    mov fs, ax
+    mov gs, ax
+
+    ; Create GDTR on stack and load it.
+    sub  rsp, 0x10
+    mov  word  [rsp + 0], 0xfff
+    mov  qword [rsp + 2], r10
+    lgdt [rsp]
+    add  rsp, 0x10
+
+    mov rax, rsp
+    lea rbx, [.continue]
+
+    ; Switch to CS = 8.
+    push 0   ; SS (0)
+    push rax ; RSP
+    pushfq   ; RFLAGS
+    push 8   ; CS
+    push rbx ; RIP
+    iretq
+
+.continue:
+    ; Old CS selector is not unused and our code segment has selector 0x08.
+
+    ; Setup data segment at selector 16.
+    mov rbx, GDT_DATA
+    mov qword [r10 + 16], rbx
+
+    ; Create GDTR on stack and load it again but with proper bounds.
+    sub  rsp, 0x10
+    mov  word  [rsp + 0], (3 * 8) - 1 ; Only 3 elements (null, code, data).
+    mov  qword [rsp + 2], r10
+    lgdt [rsp]
+    add  rsp, 0x10
+
+    ; Reload data segments.
     mov ax, 0x10
     mov ds, ax
     mov es, ax
@@ -53,26 +89,53 @@ enter_kernel:
     mov fs, ax
     mov gs, ax
 
+    ; Enable LME, LMA and NXE.
+    mov rcx, 0xc0000080
+    mov rax, (1 << 10) | (1 << 8) | (1 << 11)
+    mov rdx, 0
+    wrmsr
+
+    ; Load trampoline CR3 which maps first part of memory at address 0 (identity map)
+    ; and at address `Physical region base` (linear map).
+    mov rax, [rsp + 0x28]
+    mov cr3, rax
+
+    ; Enable some SSE stuff and PAE which is required for long mode.
+    xor rax, rax
+    or  rax, (1 <<  9) ; OSFXSR
+    or  rax, (1 << 10) ; OSXMMEXCPT
+    or  rax, (1 <<  5) ; PAE
+    mov cr4, rax
+
+    ; Enable paging, write protect and some other less important stuff.
+    xor rax, rax
+    or  eax,  (1 <<  0) ; Protected mode enable
+    or  eax,  (1 <<  1) ; Monitor co-processor
+    or  eax,  (1 << 16) ; Write protect
+    or  eax,  (1 << 31) ; Paging enable
+    mov cr0, rax
+
     ; We are currently executing code in identity map. Because kernel provides only 
     ; linear map, we need to switch to it. It's as simple as adding `Physical region base`
     ; to the target instruction address.
-    mov rax, qword [rsp + 0x24]
-    add rax, .entry_64_next
+    mov rax, qword [rsp + 0x30]
+    lea rbx, [.entry_64_next]
+    add rax, rbx
     jmp rax
 
 .entry_64_next:
     ; In System-V ABI RDI is the first parameter to the function.
     ; Load boot block to RDI so it will be passed to the kernel entrypoint.
-    mov rdi, qword [rsp + 0x14]
+    mov rdi, qword [rsp + 0x18]
 
     ; Get the entrypoint of the kernel.
-    mov rdx, qword [rsp + 0x04]
+    mov rdx, qword [rsp + 0x08]
 
     ; Get the actual page tables used by the kernel.
-    mov eax, dword [rsp + 0x1c]
+    mov rax, qword [rsp + 0x20]
 
     ; Switch to the new stack.
-    mov rsp, qword [rsp + 0x0c]
+    mov rsp, qword [rsp + 0x10]
 
     ; Because now both RIP and RSP use linear map instead of identity map,
     ; we can actually switch to the kernel CR3.
@@ -84,12 +147,6 @@ enter_kernel:
     ; Call the 64 bit kernel! (Jump cannot be used because of the ABI.)
     call rdx
 
-; GDT used to enter long mode.
-align 8
-gdt_64:
-    dq 0x0000000000000000 ; Null segment.
-    dq 0x00209a0000000000 ; Code segment.
-    dq 0x0000920000000000 ; Data segment.
-    .r:
-        dw (.r - gdt_64) - 1
-        dd gdt_64
+GDT_NULL equ 0x0000000000000000
+GDT_CODE equ 0x00209a0000000000
+GDT_DATA equ 0x0000920000000000

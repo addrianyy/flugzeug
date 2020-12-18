@@ -3,6 +3,7 @@ use alloc::collections::btree_set::BTreeSet;
 
 use crate::mm;
 use page_table::PhysAddr;
+use acpi::Header;
 
 /// Maximum number of cores allowed on the system.
 pub const MAX_CORES: usize = 1024;
@@ -82,39 +83,6 @@ pub unsafe fn notify_core_online() {
     while CORES_ONLINE.load(Ordering::SeqCst) != total_cores() {}
 }
 
-#[derive(Clone, Copy, Debug)]
-#[repr(C, packed)]
-struct Rsdp {
-    signature:         [u8; 8],
-    checksum:          u8,
-    oem_id:            [u8; 6],
-    revision:          u8,
-    rsdt_addr:         u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(C, packed)]
-struct RsdpExtended {
-    descriptor:        Rsdp,
-    length:            u32,
-    xsdt_addr:         u64,
-    extended_checksum: u8,
-    reserved:          [u8; 3],
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(C, packed)]
-struct Header {
-    signature:        [u8; 4],
-    length:           u32,
-    revision:         u8,
-    checksum:         u8,
-    oemid:            [u8; 6],
-    oem_table_id:     u64,
-    oem_revision:     u32,
-    creator_id:       u32,
-    creator_revision: u32,
-}
 
 unsafe fn parse_header(phys_addr: PhysAddr) -> (Header, PhysAddr, usize) {
     let header: Header = mm::read_phys_unaligned(phys_addr);
@@ -216,71 +184,11 @@ pub unsafe fn initialize() {
     // Make sure that the ACPI hasn't been initialized yet.
     assert!(TOTAL_CORES.load(Ordering::SeqCst) == 0, "ACPI was already initialized.");
 
-    // Get the address of the EBDA from the BDA.
-    let ebda = mm::read_phys::<u16>(PhysAddr(0x40e)) as u64;
-
-    // Regions that we need to scan for the RSDP.
-    let regions = [
-        // First 1K of the EBDA.
-        (ebda, ebda + 1024),
-
-        // Constant range specified by ACPI specification.
-        (0xe0000, 0xfffff),
-    ];
-
-    let mut found_rsdp = None;
-
-    'rsdp_scan: for &(start, end) in &regions {
-        // 16 byte align the start address upwards.
-        let start = (start + 0xf) & !0xf;
-
-        // 16 byte align the end address downwards.
-        let end = end & !0xf;
-
-        // Go through every 16 byte aligned address in the current region.
-        for phys_addr in (start..end).step_by(16) {
-            let phys_addr = PhysAddr(phys_addr);
-
-            // Read the RSDP structure.
-            let rsdp: Rsdp = mm::read_phys(phys_addr);
-
-            // Make sure that the RSDP signature matches.
-            if &rsdp.signature != b"RSD PTR " {
-                continue;
-            }
-
-            // Get the RSDP raw bytes.
-            let raw_bytes: [u8; core::mem::size_of::<Rsdp>()] = mm::read_phys(phys_addr);
-
-            // Make sure that the RSDP checksum is valid.
-            let checksum = raw_bytes.iter().fold(0u8, |acc, v| acc.wrapping_add(*v));
-            if checksum != 0 {
-                continue;
-            }
-
-            if rsdp.revision > 0 {
-                // Get the extended RSDP raw bytes.
-                let raw_bytes: [u8; core::mem::size_of::<RsdpExtended>()]
-                    = mm::read_phys(phys_addr);
-
-                // Make sure that the extended RSDP checksum is valid.
-                let checksum = raw_bytes.iter().fold(0u8, |acc, v| acc.wrapping_add(*v));
-                if checksum != 0 {
-                    continue;
-                }
-            }
-
-            // All checks succedded, we have found the RSDP.
-            found_rsdp = Some(rsdp);
-
-            break 'rsdp_scan;
-        }
-    }
-
-    let rsdp = found_rsdp.expect("Failed to find RSDP on the system.");
+    let tables = core!().boot_block.acpi_tables.lock().clone();
+    let rsdt   = tables.rsdt.expect("Bootloader didn't provide ACPI RSDT table address.");
 
     // Get the RSDT table data from the RSDP.
-    let (rsdt, rsdt_payload, rsdt_size) = parse_header(PhysAddr(rsdp.rsdt_addr as u64));
+    let (rsdt, rsdt_payload, rsdt_size) = parse_header(PhysAddr(rsdt));
 
     // Make sure that the RSDT signature matches.
     assert!(&rsdt.signature == b"RSDT", "RSDT signature is invalid.");
@@ -314,10 +222,24 @@ pub unsafe fn initialize() {
         }
     }
 
+    if let Some(apics) = &apics {
+        println!("Found {} APICs on the system.", apics.len());
+    }
+
     let current_apic_id = core!().apic_id().unwrap();
+    let ap_entrypoint   = core!().boot_block.ap_entrypoint.lock().clone();
+
+    if ap_entrypoint.is_none() {
+        println!("WARNING: Bootloader hasn't provivided realmode AP \
+                 entrypoint so APs won't be laucnhed.");
+
+        apics = None;
+    }
 
     let apics = apics.unwrap_or_else(|| {
-        println!("WARNING: No APIC table was found on the system.");
+        if ap_entrypoint.is_some() {
+            println!("WARNING: No APIC table was found on the system.");
+        }
 
         // If we haven't found APIC table then just report our APIC ID.
 
@@ -349,17 +271,17 @@ pub unsafe fn initialize() {
             continue;
         }
 
-        // AP entrypoint is hardcoded here to 0x8000. Don't change it without changing
-        // the assembly bootloader.
-        const AP_ENTRYPOINT: u32 = 0x8000;
+        let ap_entrypoint = ap_entrypoint.expect("No AP entrypoint.");
 
         // Calculate the SIPI vector which will cause APs to start
         // execution at the `AP_ENTRYPOINT`.
-        let sipi_vector = (AP_ENTRYPOINT / 0x1000) & 0xff;
+        let sipi_vector = (ap_entrypoint / 0x1000) & 0xff;
 
         // Make sure that the `AP_ENTRYPOINT` is encodable in SIPI vector.
-        assert!(sipi_vector * 0x1000 == AP_ENTRYPOINT, "AP entrypoint {:x} cannot be encoded.",
-                AP_ENTRYPOINT);
+        assert!(sipi_vector * 0x1000 == ap_entrypoint, "AP entrypoint {:x} cannot be encoded.",
+                ap_entrypoint);
+
+        let sipi_vector = sipi_vector as u32;
 
         // Mark the core as launched.
         set_core_state(apic_id, CoreState::Launched);

@@ -30,14 +30,11 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
 
         // Object file will have a name `name.obj`.
         let object_file = out_dir.join(libname).with_extension("obj");
-
-        // Archive file will have a name `libname.a`.
-        let archive_file = out_dir.join(format!("lib{}", libname)).with_extension("a");
+        let is_windows  = format.contains("win");
 
         // Convert `Path`s to UTF-8 strings.
         let source_file  = source_file.to_str().unwrap();
         let object_file  = object_file.to_str().unwrap();
-        let archive_file = archive_file.to_str().unwrap();
 
         // Project needs to be recompiled if source file has changed.
         println!("cargo:rerun-if-changed={}", source_file);
@@ -58,19 +55,43 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
         }
         println!("Done!");
 
-        // We can't directly link to the object file so we need to make an archive file first.
-        println!("\nMaking archive for {}...", libname);
-        let status = Command::new("llvm-ar-10")
-            .args(&[
-                "crus",
-                archive_file,
-                object_file,
-            ])
-            .status()
-            .expect("Failed to invoke `llvm-ar-10`.");
-        if !status.success() {
-            panic!("Failed to make archive.");
+
+        if is_windows {
+            // Archive file will have a name `libname.a`.
+            let library_file = out_dir.join(libname).with_extension("lib");
+            let library_file = library_file.to_str().unwrap();
+
+            println!("\nMaking library for {}...", libname);
+            let status = Command::new("llvm-lib-10")
+                .args(&[
+                    object_file,
+                    &format!("/out:{}", library_file),
+                ])
+                .status()
+                .expect("Failed to invoke `llvm-lib-10`.");
+            if !status.success() {
+                panic!("Failed to make library.");
+            }
+        } else {
+            // Archive file will have a name `libname.a`.
+            let archive_file = out_dir.join(format!("lib{}", libname)).with_extension("a");
+            let archive_file = archive_file.to_str().unwrap();
+
+            // We can't directly link to the object file so we need to make an archive file first.
+            println!("\nMaking archive for {}...", libname);
+            let status = Command::new("llvm-ar-10")
+                .args(&[
+                    "crus",
+                    archive_file,
+                    object_file,
+                ])
+                .status()
+                .expect("Failed to invoke `llvm-ar-10`.");
+            if !status.success() {
+                panic!("Failed to make archive.");
+            }
         }
+
         println!("Done!");
 
         // Link to the newly compiled library.

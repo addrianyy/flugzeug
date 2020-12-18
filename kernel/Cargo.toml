@@ -10,5 +10,6 @@ serial_port = { path = "../libs/serial_port" }
 boot_block = { path = "../libs/boot_block" }
 page_table = { path = "../libs/page_table" }
 rangeset = { path = "../libs/rangeset" }
+acpi = { path = "../libs/acpi" }
 lock = { path = "../libs/lock" }
 cpu = { path = "../libs/cpu" }
