@@ -27,6 +27,25 @@ pub struct AcpiTables {
     pub xsdt: Option<u64>,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct PixelFormat {
+    pub red:   u32,
+    pub green: u32,
+    pub blue:  u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct FramebufferInfo {
+    pub width:               u32,
+    pub height:              u32,
+    pub pixel_format:        PixelFormat,
+    pub pixels_per_scanline: u32,
+    pub fb_base:             u64,
+    pub fb_size:             u64,
+}
+
 /// Data shared between the bootloader and the kernel. Allows for concurrent access.
 #[repr(C)]
 pub struct BootBlock {
@@ -46,6 +65,7 @@ pub struct BootBlock {
     pub physical_map_page_size: Lock<Option<u64>>,
     pub ap_entrypoint:          Lock<Option<u64>>,
     pub acpi_tables:            Lock<AcpiTables>,
+    pub framebuffer:            Lock<Option<FramebufferInfo>>,
 }
 
 impl BootBlock {
@@ -62,6 +82,7 @@ impl BootBlock {
                 rsdt: None,
                 xsdt: None,
             }),
+            framebuffer: Lock::new(None),
         }
     }
 }
