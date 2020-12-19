@@ -56,6 +56,9 @@ pub struct BootBlock {
     /// Free physical memory ranges available on the system.
     pub free_memory: Lock<Option<RangeSet>>,
 
+    /// Free physical memory ranges available on the system.
+    pub boot_memory: Lock<Option<RangeSet>>,
+
     /// Serial port connection which allows for `print!` macros.
     pub serial_port: Lock<Option<SerialPort>>,
 
@@ -74,6 +77,7 @@ impl BootBlock {
         Self {
             size:                   core::mem::size_of::<Self>() as u64,
             free_memory:            Lock::new(None),
+            boot_memory:            Lock::new(None),
             serial_port:            Lock::new(None),
             page_table:             Lock::new(None),
             physical_map_page_size: Lock::new(None),

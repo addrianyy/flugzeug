@@ -316,8 +316,7 @@ fn alloc_error_handler(layout: Layout) -> ! {
     panic!("Allocation of memory with layout {:?} failed!", layout);
 }
 
-/// Make physical region non-executable. It can be done only after all APs are launched.
-pub unsafe fn enable_nx_on_physical_region() {
+unsafe fn enable_nx_on_physical_region() {
     let page_size = core!().boot_block.physical_map_page_size.lock()
         .expect("Bootloader didn't fill in `physical_map_page_size`.");
 
@@ -353,4 +352,28 @@ pub unsafe fn enable_nx_on_physical_region() {
                            false, true)
             .expect("Failed to remap physical region in the kernel page table.");
     }
+}
+
+pub unsafe fn on_finished_boot_process() {
+    // Make kernel physcial memory map non-executable.
+    enable_nx_on_physical_region();
+
+    let mut total_reclaimed = 0;
+
+    // Reclaim boot memory.
+    if let Some(boot_memory) = core!().boot_block.boot_memory.lock().take() {
+        for &entry in boot_memory.entries() {
+            let size = entry.size();
+
+            core!().boot_block.free_memory
+                .lock()
+                .as_mut()
+                .unwrap()
+                .insert(entry);
+
+            total_reclaimed += size;
+        }
+    }
+
+    println!("Reclaimed {}KB of boot memory.", total_reclaimed / 1024);
 }

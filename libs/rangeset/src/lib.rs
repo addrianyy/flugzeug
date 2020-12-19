@@ -44,6 +44,10 @@ impl RangeSet {
         &self.ranges[..self.used as usize]
     }
 
+    pub fn clear(&mut self) {
+        self.used = 0;
+    }
+
     /// Insert inclusive range to `RangeSet`. This function will handle possible merges.
     pub fn insert(&mut self, mut range: Range) {
         assert!(range.start <= range.end, "Range to insert has invalid shape.");

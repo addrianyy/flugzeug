@@ -8,6 +8,11 @@ global enter_kernel
 ; Here we can only refer to things via memory operands which can be RIP-relative. Otherwise
 ; compiler generates wrong code.
 
+%macro copy_argument 1
+    mov rax, [r10+%1]
+    mov [rsp+%1], rax
+%endmacro
+
 ; qword [rsp + 0x08] - Entrypoint
 ; qword [rsp + 0x10] - Stack
 ; qword [rsp + 0x18] - Boot block
@@ -15,11 +20,30 @@ global enter_kernel
 ; dword [rsp + 0x28] - Trampoline CR3
 ; qword [rsp + 0x30] - Physical region base
 ; qword [rsp + 0x38] - Uninitialized GDT
+; qword [rsp + 0x40] - Trampoline RSP
 enter_kernel:
+    ; Move all register arguments to shadow space on the stack.
     mov [rsp + 0x8],  rcx
     mov [rsp + 0x10], rdx
     mov [rsp + 0x18], r8
     mov [rsp + 0x20], r9
+
+    ; Save current stack in R10 and switch to trampoline stack.
+    mov r10, rsp
+    mov rsp, [rsp + 0x40]
+
+    ; Allocate space on trampoline stack for arguments.
+    sub rsp, 0x100
+
+    ; Copy all function arguments to trampoline stack.
+    copy_argument 0x08
+    copy_argument 0x10
+    copy_argument 0x18
+    copy_argument 0x20
+    copy_argument 0x28
+    copy_argument 0x30
+    copy_argument 0x38
+    copy_argument 0x40
 
     ; Get uninitialized GDT base.
     mov r10, [rsp + 0x38]

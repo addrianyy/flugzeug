@@ -16,7 +16,7 @@ use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_
 
 use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE};
 use elfparse::{Elf, Bitness, SegmentType, Machine};
-use mm::{PhysicalMemory, PhysicalMemory32};
+use mm::{PhysicalMemory, BootPhysicalMemory};
 use lock::Lock;
 
 // Bootloader is not thread safe. There can be only one instance of it running at a time.
@@ -47,6 +47,7 @@ struct KernelEntryData {
     kernel_cr3:     u64,
     trampoline_cr3: u64,
     gdt:            u64,
+    trampoline_rsp: u64,
 }
 
 /// Creates a unique kernel stack required for entering the kernel.
@@ -63,6 +64,9 @@ fn create_kernel_stack() -> u64 {
     let stack = VirtAddr(*next_stack_address);
 
     // Map the stack to the kernel address space.
+    // It is possible that this page table contains some physical addresses > 4GB that we cannot
+    // access. This is fine, as this area of virtual memory is used only by the bootloader
+    // so it won't contain these addesses.
     page_table.map(&mut PhysicalMemory, stack, PageType::Page4K, KERNEL_STACK_SIZE, true, false)
         .expect("Failed to map kernel stack.");
 
@@ -82,16 +86,12 @@ impl APEntry {
         if false {
             // Reserve memory to test segment handling in AP entrypoint.
             // Testing only.
-            BOOT_BLOCK.free_memory
-                .lock()
-                .as_mut()
-                .unwrap()
-                .allocate_limited(0x11000, 0x1000, Some(0x100000 - 1))
+            mm::allocate_low_boot_memory(0x11000, 0x1000)
                 .expect("Failed to allocate testing area.");
         }
 
-        // 16KB of stack. Bootloader needs a lot of stack because it uses `RangeSet`.
-        const STACK_SIZE: usize = 16 * 1024;
+        // 8KB of stack should be enough.
+        const STACK_SIZE: usize = 8 * 1024;
 
         let entrypoint_code = AP_ENTRYPOINT;
         let code_size       = (entrypoint_code.len() + 0xfff) & !0xfff;
@@ -100,11 +100,7 @@ impl APEntry {
         assert!(area_size & 0xfff == 0, "AP entrypoint area size is not page aligned.");
 
         // Allocate AP area in low memory that is accesible by 16 bit code.
-        let area_address = BOOT_BLOCK.free_memory
-            .lock()
-            .as_mut()
-            .unwrap()
-            .allocate_limited(area_size as u64, 0x1000, Some(0x100000 - 1))
+        let area_address = mm::allocate_low_boot_memory(area_size as u64, 0x1000)
             .expect("Failed to allocate AP entrypoint.");
 
         let code_address = (area_address as usize) + STACK_SIZE;
@@ -195,8 +191,9 @@ fn setup_kernel() -> (KernelEntryData, u64) {
     assert!(elf.machine() == Machine::Amd64, "Loaded kernel is AMD64 binary.");
 
     // Allocate a page table that will be used when transitioning to the kernel.
-    // It will be also used by AP entrypoint so it needs to be in address < 4GB.
-    let mut trampoline_page_table = PageTable::new(&mut PhysicalMemory32)
+    // We should use `BootPhysicalMemory` with it because it won't be needed after
+    // finishing boot process.
+    let mut trampoline_page_table = PageTable::new(&mut BootPhysicalMemory)
         .expect("Failed to allocate trampoline page table.");
 
     // Allocate a page table that will be used by the kernel.
@@ -259,7 +256,11 @@ fn setup_kernel() -> (KernelEntryData, u64) {
     //    to RIP in order to use kernel-valid address.
     // 3. Switch to the actual kernel page tables, switch stack and jump to the kernel.
 
-    // We hope that 4GB mapping is enough. TODO: Fix this.
+    // We map 4GB of memory for trampoline page table. This means that bootloader can
+    // only touch first 4GB of memory when launching APs.
+    // We will also map this bootloader image if it is > 4GB.
+    // We will also need to create trampoline stack which will be mapped in this trampoline
+    // page table.
     const TRAMPOLINE_PHYSICAL_REGION_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 
     let features = cpu::get_features();
@@ -267,7 +268,7 @@ fn setup_kernel() -> (KernelEntryData, u64) {
     assert!(KERNEL_PHYSICAL_REGION_SIZE >= TRAMPOLINE_PHYSICAL_REGION_SIZE);
     assert!(features.page2m, "CPU needs to support at least 2M pages.");
 
-    // Setup trampoline page table.
+    // Setup trampoline page table using 2MB pages.
     for phys_addr in (0..TRAMPOLINE_PHYSICAL_REGION_SIZE).step_by(2 * 1024 * 1024) {
         // Map current `phys_addr` at virtual address `phys_addr` and virtual address
         // `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`. All this memory will be both
@@ -275,10 +276,33 @@ fn setup_kernel() -> (KernelEntryData, u64) {
         for &virt_addr in &[VirtAddr(phys_addr),
                             VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE)] {
             unsafe {
-                trampoline_page_table.map_raw(&mut PhysicalMemory, virt_addr, PageType::Page2M,
+                trampoline_page_table.map_raw(&mut BootPhysicalMemory, virt_addr, PageType::Page2M,
                                               phys_addr | PAGE_WRITE | PAGE_PRESENT | PAGE_SIZE,
                                               true, false)
                     .expect("Failed to map physical region in the trampoline page table.");
+            }
+        }
+    }
+
+    // Map in bootloader image to the trampoline page table.
+    let bootloader = mm::bootloader_image();
+
+    for offset in (0..bootloader.size).step_by(4096) {
+        let phys_addr = (bootloader.base + offset) as u64;
+
+        // If this page is < 4GB it is already mapped in.
+        if phys_addr <= (mm::MAX_ADDRESS as u64) {
+            continue;
+        }
+
+        // Map this page using small 4K pages.
+        for &virt_addr in &[VirtAddr(phys_addr),
+                            VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE)] {
+            unsafe {
+                trampoline_page_table.map_raw(&mut BootPhysicalMemory, virt_addr, PageType::Page4K,
+                                              phys_addr | PAGE_WRITE | PAGE_PRESENT,
+                                              true, false)
+                    .expect("Failed to map bootloader in the trampoline page table.");
             }
         }
     }
@@ -331,32 +355,39 @@ fn setup_kernel() -> (KernelEntryData, u64) {
         }
     }
 
+    // Get bases of both page tables.
     let kernel_cr3     = kernel_page_table.table().0;
     let trampoline_cr3 = trampoline_page_table.table().0;
-    let gdt            = BOOT_BLOCK.free_memory.lock().as_mut()
-        .unwrap()
-        .allocate(4096, 8)
+
+    let gdt = mm::allocate_boot_memory(4096, 8)
         .expect("Failed to allocate GDT.");
 
-    // Cache page tables which will be used by all APs.
-    *BOOT_BLOCK.page_table.lock() = Some(kernel_page_table);
+    // It is possible that current stack is not mapped in trampoline page tables.
+    // To hande this we need to create a small trampoline stack.
+    let trampoline_stack = mm::allocate_boot_memory(4096, 8)
+        .expect("Failed to allocate trampoline stack.");
+    let trampoline_rsp = trampoline_stack as u64 + 4096;
 
     unsafe {
         ap_entrypoint.finalize_and_register(trampoline_cr3);
     }
 
-    println!("Kernel base is {:x}.", elf.base_address());
-    println!("Kernel entrypoint is {:x}.", elf.entrypoint());
+    println!("Kernel base is 0x{:x}.", elf.base_address());
+    println!("Kernel entrypoint is 0x{:x}.", elf.entrypoint());
 
     let entry_data = KernelEntryData {
         entrypoint: elf.entrypoint(),
         gdt:        gdt as u64,
         kernel_cr3,
         trampoline_cr3,
+        trampoline_rsp,
     };
 
     // Cache entry data so APs can use them later to enter the kernel.
     *KERNEL_ENTRY_DATA.lock() = Some(entry_data);
+
+    // Cache page tables which will be used by all APs.
+    *BOOT_BLOCK.page_table.lock() = Some(kernel_page_table);
 
     // Create a unique stack for this core.
     let rsp = create_kernel_stack() + KERNEL_STACK_SIZE;
@@ -367,13 +398,11 @@ fn setup_kernel() -> (KernelEntryData, u64) {
 unsafe fn locate_acpi(system_table: *mut efi::EfiSystemTable) {
     use efi::EfiGuid;
 
-    const EFI_ACPI_TABLE_GUID: EfiGuid = EfiGuid(0xeb9d2d30, 0x2d88, 0x11d3,
-                                                 [0x9a, 0x16, 0x0, 0x90,
-                                                  0x27, 0x3f, 0xc1, 0x4d]);
+    const EFI_ACPI_TABLE_GUID: EfiGuid =
+        EfiGuid(0xeb9d2d30, 0x2d88, 0x11d3, [0x9a, 0x16, 0x0, 0x90, 0x27, 0x3f, 0xc1, 0x4d]);
 
-    const EFI_ACPI_20_TABLE_GUID: EfiGuid = EfiGuid(0x8868e871, 0xe4f1, 0x11d3,
-                                                    [0xbc, 0x22, 0x0, 0x80,
-                                                     0xc7, 0x3c, 0x88, 0x81]);
+    const EFI_ACPI_20_TABLE_GUID: EfiGuid =
+        EfiGuid(0x8868e871, 0xe4f1, 0x11d3, [0xbc, 0x22, 0x0, 0x80, 0xc7, 0x3c, 0x88, 0x81]);
 
     let configuration_table = {
         let entry_count = (*system_table).table_entries;
@@ -412,8 +441,8 @@ unsafe fn locate_acpi(system_table: *mut efi::EfiSystemTable) {
 unsafe fn initialize_framebuffer(system_table: *mut efi::EfiSystemTable) {
     use efi::EfiGuid;
 
-    const EFI_GOP_GUID: EfiGuid = EfiGuid(0x9042a9de, 0x23dc, 0x4a38, [0x96, 0xfb, 0x7a, 0xde,
-                                                                       0xd0, 0x80, 0x51, 0x6a]);
+    const EFI_GOP_GUID: EfiGuid =
+        EfiGuid(0x9042a9de, 0x23dc, 0x4a38, [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a]);
 
     fn is_pixel_format_usable(format: efi::EfiGraphicsPixelFormat) -> bool {
         matches!(format, efi::PIXEL_RGB | efi::PIXEL_BGR | efi::PIXEL_BITMASK)
@@ -522,13 +551,15 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
 
     extern "C" {
         fn enter_kernel(entrypoint: u64, rsp: u64, boot_block: u64, kernel_cr3: u64,
-                        trampoline_cr3: u64, physical_region: u64, gdt: u64) -> !;
+                        trampoline_cr3: u64, physical_region: u64, gdt: u64,
+                        trampoline_rsp: u64) -> !;
     }
 
     // Enter the 64 bit kernel!
     unsafe {
         enter_kernel(entry_data.entrypoint, rsp, &BOOT_BLOCK as *const _ as u64,
                      entry_data.kernel_cr3, entry_data.trampoline_cr3,
-                     KERNEL_PHYSICAL_REGION_BASE, entry_data.gdt);
+                     KERNEL_PHYSICAL_REGION_BASE, entry_data.gdt,
+                     entry_data.trampoline_rsp);
     }
 }

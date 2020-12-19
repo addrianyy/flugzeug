@@ -1,6 +1,6 @@
-pub type Handle          = usize;
-pub type EfiMemoryType   = u32;
-pub type EfiStatus       = usize;
+pub type Handle        = usize;
+pub type EfiMemoryType = u32;
+pub type EfiStatus     = usize;
 
 #[repr(C)]
 pub struct EfiMemoryDescriptor {
@@ -38,6 +38,15 @@ pub type LocateProtocol = unsafe extern "efiapi" fn(
 pub type ExitBootServices = unsafe extern "efiapi" fn(
     image_handle: usize,
     map_key:      usize,
+) -> EfiStatus;
+
+pub type OpenProtocol = unsafe extern "efiapi" fn (
+    handle:     Handle,
+    protocol:   &EfiGuid,
+    interface:  &mut usize,
+    agent:      Handle,
+    controller: Handle,
+    attributes: u32,
 ) -> EfiStatus;
 
 #[repr(C)]
@@ -89,7 +98,7 @@ pub struct EfiBootServices {
     pub set_watchdog_timer:                     usize,
     pub connect_controller:                     usize,
     pub disconnect_controller:                  usize,
-    pub open_protocol:                          usize,
+    pub open_protocol:                          OpenProtocol,
     pub close_protocol:                         usize,
     pub open_protocol_information:              usize,
     pub protocols_per_handle:                   usize,
@@ -133,6 +142,23 @@ pub struct EfiSystemTable {
 
     pub table_entries:       usize,
     pub configuration_table: *mut EfiConfigurationTable,
+}
+
+#[repr(C)]
+pub struct EfiLoadedImageProtocol {
+    pub revision:        u32,
+    pub parent:          Handle,
+    pub system_table:    *mut EfiSystemTable,
+    pub device:          Handle,
+    pub file_path:       usize,
+    pub reserved:        usize,
+    pub load_opts_size:  u32,
+    pub load_opts:       usize,
+    pub image_base:      usize,
+    pub image_size:      usize,
+    pub image_code_type: EfiMemoryType,
+    pub image_data_type: EfiMemoryType,
+    pub unload:          usize,
 }
 
 pub const EFI_LOADER_CODE:          u32 = 1;

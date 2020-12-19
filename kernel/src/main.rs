@@ -316,9 +316,9 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         acpi::notify_core_online();
 
         if core!().id == 0 {
-            // All cores are now launched and we can make kernel physical region non-executable.
-            // We do this only once because page tables are shared between cores.
-            mm::enable_nx_on_physical_region();
+            // All cores are now launched and we have finished boot process.
+            // Allow memory manager to clean up some things.
+            mm::on_finished_boot_process();
         }
     }
 
