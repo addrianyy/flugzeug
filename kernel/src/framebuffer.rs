@@ -1,6 +1,9 @@
 use boot_block::{FramebufferInfo, PixelFormat};
 use page_table::{PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_CACHE_DISABLE, PAGE_NX, VirtAddr};
 use crate::{mm, font};
+use lock::Lock;
+
+static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
 
 struct Framebuffer {
     width:               usize,
@@ -114,10 +117,10 @@ impl Font {
         let char_data = &self.data[index..][..self.height];
 
         for oy in 0..self.height {
-            let row_data = char_data[oy];
+            let line_data = char_data[oy];
 
             for ox in 0..self.width {
-                let set   = row_data & (1 << (7 - ox)) != 0;
+                let set   = line_data & (1 << (7 - ox)) != 0;
                 let color = if set { foreground } else { background };
 
                 framebuffer.set_pixel(x + ox + self.x_padding, y + oy + self.y_padding, color);
@@ -126,7 +129,7 @@ impl Font {
     }
 }
 
-struct TextFramebuffer {
+pub struct TextFramebuffer {
     framebuffer: Framebuffer,
 
     font:   Font,
@@ -140,8 +143,7 @@ struct TextFramebuffer {
 }
 
 impl TextFramebuffer {
-    fn new(framebuffer: Framebuffer) -> Self {
-        let font = Font::new(&font::FONT, 8, font::HEIGHT, 1, 1);
+    fn new(framebuffer: Framebuffer, font: Font) -> Self {
 
         let width  = framebuffer.width  / font.visual_width;
         let height = framebuffer.height / font.visual_height;
@@ -174,40 +176,62 @@ impl TextFramebuffer {
             // We are out of vertical space and we need to scroll.
 
             // Calculate number of pixels in one text line.
-            let pixels_per_y = self.font.visual_height * self.framebuffer.pixels_per_scanline;
+            let pixels_per_line = self.font.visual_height * self.framebuffer.pixels_per_scanline;
 
+            let from_y = 1;
+            let to_y   = 0;
+
+            let from_start = from_y * pixels_per_line;
+            let to_start   = to_y   * pixels_per_line;
+            let copy_size  = (self.height - 1) * pixels_per_line;
+            
             // Move every line one line up (except the first one).
-            for y in 1..self.height {
-                let from_y = y;
-                let to_y   = y - 1;
+            // Because we don't have optimized memcpy we will manually copy pixels in framebuffer.
+            // As there is overlap and source > destination we need to copy forwards.
+            unsafe {
+                let from_ptr: *mut u32 = &mut self.framebuffer.buffer[from_start];
+                let to_ptr:   *mut u32 = &mut self.framebuffer.buffer[to_start];
 
-                let from_start = from_y * pixels_per_y;
-                let to_start   = to_y   * pixels_per_y;
-
-                let copy_size = pixels_per_y;
-
-                // Copy every pixel from `from_y` line to `to_y` line.
-                for index in 0..copy_size {
-                    let from = from_start + index;
-                    let to   = to_start   + index;
-
-                    unsafe {
-                        let value = core::ptr::read_volatile(&self.framebuffer.buffer[from]);
-                        core::ptr::write_volatile(&mut self.framebuffer.buffer[to], value);
-                    }
+                if copy_size & 1 == 0 {
+                    asm!(
+                        "rep movsq",
+                        inout("rsi") from_ptr      => _,
+                        inout("rdi") to_ptr        => _,
+                        inout("rcx") copy_size / 2 => _,
+                    );
+                } else {
+                    asm!(
+                        "rep movsd",
+                        inout("rsi") from_ptr  => _,
+                        inout("rdi") to_ptr    => _,
+                        inout("rcx") copy_size => _,
+                    );
                 }
             }
 
             // Clear the last line.
-            let clear_size = pixels_per_y;
-            let clear_y    = self.height - 1;
+            let clear_y     = self.height - 1;
+            let clear_start = clear_y * pixels_per_line;
+            let clear_size  = pixels_per_line;
+            let clear_value = (self.background as u64) << 32 | (self.background as u64);
 
-            for index in 0..clear_size {
-                let index = clear_y * pixels_per_y + index;
+            unsafe {
+                let clear_ptr: *mut u32 = &mut self.framebuffer.buffer[clear_start];
 
-                unsafe {
-                    core::ptr::write_volatile(&mut self.framebuffer.buffer[index],
-                                              self.background);
+                if clear_size & 1 == 0 {
+                    asm!(
+                        "rep stosq",
+                        in("rax")    clear_value,
+                        inout("rdi") clear_ptr      => _,
+                        inout("rcx") clear_size / 2 => _,
+                    );
+                } else {
+                    asm!(
+                        "rep stosd",
+                        in("rax")    clear_value,
+                        inout("rdi") clear_ptr  => _,
+                        inout("rcx") clear_size => _,
+                    );
                 }
             }
 
@@ -216,7 +240,7 @@ impl TextFramebuffer {
         }
     }
 
-    fn write_char(&mut self, ch: char) {
+    pub fn write_char(&mut self, ch: char) {
         // Handle special characters.
         match ch {
             '\r' => { self.x = 0;     return; },
@@ -224,7 +248,7 @@ impl TextFramebuffer {
             _    => (),
         }
 
-        // Convert character to ASCII. Use '?' when cannot convert.
+        // Convert character to ASCII. Use '?' when conversion is impossible.
         let byte: u8 = if ch.is_ascii() {
             ch as u8
         } else {
@@ -248,35 +272,50 @@ impl TextFramebuffer {
         }
     }
 
-    fn test(&mut self) {
-        for index in 0..39 {
-            let name = alloc::format!("{}", index);
-            for ch in name.chars() {
-                self.write_char(ch);
-            }
-
-            self.write_char('\n');
+    pub fn write_string(&mut self, string: &str) {
+        for ch in string.chars() {
+            self.write_char(ch);
         }
     }
 }
 
-fn test() {
-    let framebuffer_info: Option<FramebufferInfo> =
-        core!().boot_block.framebuffer.lock().clone();
+impl core::fmt::Write for TextFramebuffer {
+    fn write_str(&mut self, string: &str) -> core::fmt::Result {
+        self.write_string(string);
 
-    if let Some(framebuffer_info) = framebuffer_info {
-        println!("Got framebuffer device.");
-
-        let framebuffer = unsafe {
-            Framebuffer::new(&framebuffer_info)
-        };
-
-        let mut framebuffer = TextFramebuffer::new(framebuffer);
-
-        framebuffer.test();
+        Ok(())
     }
 }
 
 pub unsafe fn initialize() {
-    test();
+    let mut kernel_framebuffer = FRAMEBUFFER.lock();
+
+    assert!(kernel_framebuffer.is_none(), "Framebuffer was already initialized.");
+
+    // Get framebuffer information from the bootloader.
+    let framebuffer_info: Option<FramebufferInfo> =
+        core!().boot_block.framebuffer.lock().clone();
+
+    if let Some(framebuffer_info) = framebuffer_info {
+        // Create graphics framebuffer.
+        let framebuffer = Framebuffer::new(&framebuffer_info);
+
+        let font = Font::new(&font::FONT, 8, font::HEIGHT, 1, 1);
+
+        // Create text framebuffer which uses graphics framebuffer and our simple bitmap
+        // font.
+        let framebuffer = TextFramebuffer::new(framebuffer, font);
+
+        // Set global kernel text framebuffer.
+        *kernel_framebuffer = Some(framebuffer);
+
+        drop(kernel_framebuffer);
+
+        println!("Initialized framebuffer device with resolution {}x{}.",
+                 framebuffer_info.width, framebuffer_info.height);
+    }
+}
+
+pub fn get() -> &'static Lock<Option<TextFramebuffer>> {
+    &FRAMEBUFFER
 }

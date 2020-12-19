@@ -25,16 +25,11 @@ dependencies = [
  "acpi",
  "boot_block",
  "cpu",
- "libc_routines",
  "lock",
  "page_table",
  "rangeset",
  "serial_port",
 ]
-
-[[package]]
-name = "libc_routines"
-version = "0.1.0"
 
 [[package]]
 name = "lock"
