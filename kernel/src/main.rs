@@ -61,8 +61,12 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         asm!("mov ax, ds", out("ax") ds);
     }
 
-    println!("Hello from flugzeug kernel! Core ID: {}. APIC ID {:?}. CS 0x{:x}, DS 0x{:x}",
-             core!().id, core!().apic_id(), cs, ds);
+    color_println!(0x00ffff, "Core is now initialized. Core ID: {}. APIC ID {:?}. \
+                   CS 0x{:x}, DS 0x{:x}.", core!().id, core!().apic_id(), cs, ds);
+
+    if core!().id == 0 {
+        color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");
+    }
 
     cpu::halt();
 }

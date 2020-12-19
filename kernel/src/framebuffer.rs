@@ -3,16 +3,25 @@ use page_table::{PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_CACHE_DISABLE, PAGE_NX
 use crate::{mm, font};
 use lock::Lock;
 
+pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
+
 static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
+
+enum ColorMode {
+    RGB,
+    BGR,
+    Custom,
+}
 
 struct Framebuffer {
     width:               usize,
     height:              usize,
     pixels_per_scanline: usize,
 
-    black:   u32,
-    white:   u32,
-    _format: PixelFormat,
+    black:      u32,
+    white:      u32,
+    _format:    PixelFormat,
+    color_mode: ColorMode,
 
     buffer: &'static mut [u32],
 }
@@ -51,6 +60,17 @@ impl Framebuffer {
             white |= mask;
         }
 
+        // This is different than UEFI values.
+        let color_mode = match info.pixel_format {
+            PixelFormat { red: 0xff0000, green: 0x00ff00, blue: 0x0000ff } => {
+                ColorMode::RGB
+            }
+            PixelFormat { red: 0x0000ff, green: 0x00ff00, blue: 0xff0000 } => {
+                ColorMode::BGR
+            }
+            _ => ColorMode::Custom,
+        };
+
         Self {
             width:               info.width  as usize,
             height:              info.height as usize,
@@ -59,6 +79,7 @@ impl Framebuffer {
             black: 0,
             white,
             _format: info.pixel_format,
+            color_mode,
 
             buffer,
         }
@@ -80,6 +101,23 @@ impl Framebuffer {
 
         unsafe {
             core::ptr::write_volatile(&mut self.buffer[index], color);
+        }
+    }
+
+    fn convert_color(&self, color: u32) -> u32 {
+        assert!(color & 0xff00_0000 == 0, "Invalid RGB color {:x} passed \
+                to `convert_color`.", color);
+
+        match self.color_mode {
+            ColorMode::RGB => color,
+            ColorMode::BGR => {
+                let r = (color >> 16) & 0xff;
+                let g = (color >> 8)  & 0xff;
+                let b = (color >> 0)  & 0xff;
+
+                (r << 0) | (g << 8) | (b << 16)
+            }
+            _ => panic!("Custom color mode framebuffers are not fully supported yet."),
         }
     }
 }
@@ -138,8 +176,9 @@ pub struct TextFramebuffer {
     width:  usize,
     height: usize,
 
-    background: u32,
-    foreground: u32,
+    background:         u32,
+    foreground:         u32,
+    default_foreground: u32,
 }
 
 impl TextFramebuffer {
@@ -151,15 +190,26 @@ impl TextFramebuffer {
         assert!(width  > 1, "Text framebuffer width must > 1.");
         assert!(height > 1, "Text framebuffer height must > 1.");
 
+        let background         = framebuffer.black;
+        let default_foreground = if DEFAULT_FOREGROUND_COLOR == 0xffffff {
+            // To support framebuffers with weird color formats.
+            framebuffer.white
+        } else {
+            framebuffer.convert_color(DEFAULT_FOREGROUND_COLOR)
+        };
+
         let mut text_fb = Self {
             font,
             x: 0,
             y: 0,
             width,
             height,
-            foreground: framebuffer.white,
-            background: framebuffer.black,
+
             framebuffer,
+
+            default_foreground,
+            foreground: default_foreground,
+            background,
         };
 
         text_fb.framebuffer.clear(text_fb.background);
@@ -277,6 +327,18 @@ impl TextFramebuffer {
             self.write_char(ch);
         }
     }
+
+    pub fn reset_color(&mut self) {
+        self.foreground = self.default_foreground;
+    }
+
+    pub fn set_color(&mut self, color: u32) {
+        if color == DEFAULT_FOREGROUND_COLOR {
+            self.reset_color();
+        } else {
+            self.foreground = self.framebuffer.convert_color(color);
+        }
+    }
 }
 
 impl core::fmt::Write for TextFramebuffer {
@@ -311,7 +373,7 @@ pub unsafe fn initialize() {
 
         drop(kernel_framebuffer);
 
-        println!("Initialized framebuffer device with resolution {}x{}.",
+        println!("Initialized framebuffer device with {}x{} resolution.",
                  framebuffer_info.width, framebuffer_info.height);
 
         if true {
