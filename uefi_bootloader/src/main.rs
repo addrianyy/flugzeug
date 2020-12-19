@@ -46,8 +46,8 @@ struct KernelEntryData {
     entrypoint:     u64,
     kernel_cr3:     u64,
     trampoline_cr3: u64,
-    gdt:            u64,
     trampoline_rsp: u64,
+    gdt:            u64,
 }
 
 /// Creates a unique kernel stack required for entering the kernel.
@@ -262,6 +262,10 @@ fn setup_kernel() -> (KernelEntryData, u64) {
     // We will also need to create trampoline stack which will be mapped in this trampoline
     // page table.
     const TRAMPOLINE_PHYSICAL_REGION_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+
+    // Make sure that we agree with memory manager.
+    assert!(mm::MAX_ADDRESS + 1 == TRAMPOLINE_PHYSICAL_REGION_SIZE as usize,
+            "Trampoline PT size doesn't match with MM max address.");
 
     let features = cpu::get_features();
 
