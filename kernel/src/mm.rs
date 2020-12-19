@@ -375,5 +375,15 @@ pub unsafe fn on_finished_boot_process() {
         }
     }
 
-    println!("Reclaimed {}KB of boot memory.", total_reclaimed / 1024);
+    let mut total_free = 0;
+
+    // Sum up all free memory.
+    if let Some(free_memory) = core!().boot_block.free_memory.lock().as_ref() {
+        for entry in free_memory.entries() {
+            total_free += entry.size();
+        }
+    }
+
+    println!("Reclaimed {}MB of boot memory. {}MB of available memory.",
+             total_reclaimed / (1024 * 1024), total_free / (1024 * 1024));
 }

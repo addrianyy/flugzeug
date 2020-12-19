@@ -185,5 +185,5 @@ unsafe extern "C" fn handle_interrupt(int: u8, frame: &mut InterruptFrame, _erro
     println!("Interrupt frame: {:#x?}", frame);
     println!("Register state: {:#x?}", regs);
 
-    cpu::halt();
+    panic!("Unhandled kernel exception.");
 }
