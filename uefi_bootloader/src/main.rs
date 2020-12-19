@@ -5,6 +5,8 @@
 extern crate libc_routines;
 
 #[macro_use] mod serial;
+
+mod framebuffer_resolutions;
 mod panic;
 mod efi;
 mod mm;
@@ -463,25 +465,105 @@ unsafe fn initialize_framebuffer(system_table: *mut efi::EfiSystemTable) {
     }
 
     let protocol = &mut *(protocol as *mut efi::EfiGraphicsOutputProtocol);
-
-    /*
     let max_mode = (*protocol.mode).max_mode;
+
+    let preferred_resolutions = framebuffer_resolutions::PREFERRED_RESOLUTIONS;
+
+    let mut best_mode  = None;
+    let mut dense_mode = None;
+
+    let mut supported_modes = boot_block::SupportedModes {
+        modes:    [(0, 0); boot_block::MAX_SUPPORTED_MODES],
+        count:    0,
+        overflow: false,
+    };
 
     for mode in 0..max_mode {
         let mut info         = core::ptr::null_mut();
         let mut size_of_info = 0;
 
         let status = (protocol.query_mode)(protocol, mode, &mut size_of_info, &mut info);
+        if  status != 0 {
+            println!("WARNING: Failed to query display mode {}.", mode);
+            continue;
+        }
 
-        assert!(status == 0);
-        assert!(size_of_info >= core::mem::size_of::<efi::EfiGraphicsOutputModeInformation>());
+        assert!(size_of_info >= core::mem::size_of::<efi::EfiGraphicsOutputModeInformation>(),
+                "EFI returned too small output mode information.");
 
         let info = &*info;
 
-        println!("{}x{} {} {}", info.horizontal_res, info.vertical_res, info.pixel_format,
-                 info.pixels_per_scanline);
+        if !is_pixel_format_usable(info.pixel_format) {
+            continue;
+        }
+
+        let has_preferred_format = matches!(info.pixel_format, efi::PIXEL_RGB | efi::PIXEL_BGR);
+        let resolution           = (info.horizontal_res, info.vertical_res);
+
+        if let Some(index) = preferred_resolutions.iter().position(|r| *r == resolution) {
+            // Pick one with higher priority (lower index).
+            let is_better = match best_mode {
+                Some((other_index, _)) => {
+                    if index == other_index {
+                        has_preferred_format
+                    } else {
+                        index < other_index
+                    }
+                }
+                None => true,
+            };
+
+            if is_better {
+                best_mode = Some((index, mode));
+            }
+        } else {
+            let pixels = resolution.0 * resolution.1;
+
+            // Pick one with higher pixel count.
+            let is_better = match dense_mode {
+                Some((other_pixels, _)) => {
+                    if pixels == other_pixels {
+                        has_preferred_format
+                    } else {
+                        pixels > other_pixels
+                    }
+                }
+                None => true,
+            };
+
+            if is_better {
+                dense_mode = Some((pixels, mode));
+            }
+        }
+
+        if false {
+            println!("{}x{}; pixel format {}.", info.horizontal_res, info.vertical_res,
+                     info.pixel_format);
+        }
+
+        if (supported_modes.count as usize) >= boot_block::MAX_SUPPORTED_MODES {
+            supported_modes.overflow = true;
+        } else {
+            let index = supported_modes.count as usize;
+
+            supported_modes.modes[index] = resolution;
+
+            supported_modes.count += 1;
+        }
     }
-    */
+
+    // Inform the kernel about supported framebuffer formats.
+    *BOOT_BLOCK.supported_modes.lock() = Some(supported_modes);
+
+    // If we haven't found any of the preferred modes than pick one with highest pixel count.
+    if best_mode.is_none() {
+        best_mode = dense_mode.map(|(pixels, mode)| (pixels as usize, mode));
+    }
+
+    if let Some((_, best_mode)) = best_mode {
+        assert!((protocol.set_mode)(protocol, best_mode) == 0,
+                "Failed to switch to preferred FB mode.");
+    }
 
     let mode      = &(*protocol.mode);
     let mode_info = &(*mode.info);

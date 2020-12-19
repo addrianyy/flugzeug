@@ -1,5 +1,5 @@
 #!/bin/sh
-cargo run && qemu-system-x86_64 -serial stdio -smp 64 -cpu host -enable-kvm \
+cargo run && qemu-system-x86_64 -serial stdio -smp 4 -cpu host -enable-kvm \
     -drive file=build/flugzeug_uefi,index=0,media=disk,format=raw \
     -m 32G \
     -net none \

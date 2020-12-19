@@ -313,6 +313,24 @@ pub unsafe fn initialize() {
 
         println!("Initialized framebuffer device with resolution {}x{}.",
                  framebuffer_info.width, framebuffer_info.height);
+
+        if true {
+            if let Some(supported_modes) = core!().boot_block.supported_modes.lock().as_ref() {
+                println!("Supported modes:");
+
+                let count = supported_modes.count as usize;
+
+                for (width, height) in &supported_modes.modes[..count] {
+                    println!("  {}x{}", width, height);
+                }
+
+                println!();
+
+                if supported_modes.overflow {
+                    println!("WARNING: Detected supported mode list overflow.");
+                }
+            }
+        }
     }
 }
 

@@ -46,6 +46,16 @@ pub struct FramebufferInfo {
     pub fb_size:             u64,
 }
 
+pub const MAX_SUPPORTED_MODES: usize = 128;
+
+#[repr(C)]
+#[derive(Clone)]
+pub struct SupportedModes {
+    pub modes:    [(u32, u32); MAX_SUPPORTED_MODES],
+    pub count:    u32,
+    pub overflow: bool,
+}
+
 /// Data shared between the bootloader and the kernel. Allows for concurrent access.
 #[repr(C)]
 pub struct BootBlock {
@@ -69,6 +79,7 @@ pub struct BootBlock {
     pub ap_entrypoint:          Lock<Option<u64>>,
     pub acpi_tables:            Lock<AcpiTables>,
     pub framebuffer:            Lock<Option<FramebufferInfo>>,
+    pub supported_modes:        Lock<Option<SupportedModes>>,
 }
 
 impl BootBlock {
@@ -86,7 +97,8 @@ impl BootBlock {
                 rsdt: None,
                 xsdt: None,
             }),
-            framebuffer: Lock::new(None),
+            framebuffer:     Lock::new(None),
+            supported_modes: Lock::new(None),
         }
     }
 }

@@ -6,7 +6,7 @@
 extern crate alloc;
 
 #[macro_use] mod core_locals;
-#[macro_use] mod serial;
+#[macro_use] mod print;
 mod mm;
 mod apic;
 mod acpi;
