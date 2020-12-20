@@ -2,10 +2,49 @@ use boot_block::{FramebufferInfo, PixelFormat};
 use page_table::{PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_CACHE_DISABLE, PAGE_NX, VirtAddr};
 use crate::{mm, font};
 use lock::Lock;
+use alloc::{vec, boxed::Box};
 
 pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 
 static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
+
+unsafe fn copy_32(from: *mut u32, to: *mut u32, size: usize) {
+    if size & 1 == 0 {
+        asm!(
+            "rep movsq",
+            inout("rsi") from     => _,
+            inout("rdi") to       => _,
+            inout("rcx") size / 2 => _,
+        );
+    } else {
+        asm!(
+            "rep movsd",
+            inout("rsi") from => _,
+            inout("rdi") to   => _,
+            inout("rcx") size => _,
+        );
+    }
+}
+
+unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
+    let value = (value as u64) << 32 | (value as u64);
+
+    if size & 1 == 0 {
+        asm!(
+            "rep stosq",
+            inout("rdi") target   => _,
+            inout("rcx") size / 2 => _,
+            inout("rax") value    => _,
+        );
+    } else {
+        asm!(
+            "rep stosd",
+            inout("rdi") target => _,
+            inout("rcx") size   => _,
+            inout("rax") value  => _,
+        );
+    }
+}
 
 enum ColorMode {
     RGB,
@@ -23,7 +62,8 @@ struct Framebuffer {
     _format:    PixelFormat,
     color_mode: ColorMode,
 
-    buffer: &'static mut [u32],
+    mmio:   &'static mut [u32],
+    buffer: Box<[u32]>,
 }
 
 impl Framebuffer {
@@ -32,26 +72,31 @@ impl Framebuffer {
         assert!(info.fb_base     != 0, "Framebuffer is null.");
         assert!(info.width > 0 && info.height > 0, "Framebuffer is empty");
 
-        let mut page_table = core!().boot_block.page_table.lock();
-        let page_table     = page_table.as_mut().unwrap();
+        let mmio = {
+            let mut page_table = core!().boot_block.page_table.lock();
+            let page_table     = page_table.as_mut().unwrap();
 
-        let aligned_size = (info.fb_size + 0xfff) & !0xfff;
-        let virt_addr    = mm::reserve_virt_addr(aligned_size as usize);
+            let aligned_size = (info.fb_size + 0xfff) & !0xfff;
+            let virt_addr    = mm::reserve_virt_addr(aligned_size as usize);
 
-        // Map framebuffer into virtual memory.
-        for offset in (0..aligned_size).step_by(4096) {
-            let backing   = info.fb_base + offset;
-            let backing   = PAGE_PRESENT | PAGE_WRITE | PAGE_CACHE_DISABLE | PAGE_NX | backing;
-            let virt_addr = VirtAddr(virt_addr.0 + offset);
+            // Map framebuffer into virtual memory.
+            for offset in (0..aligned_size).step_by(4096) {
+                // PAGE_CACHE_DISABLE doesn't seem to be needed here and enabling it causes
+                // huge slowdown.
+                let fb_phys   = info.fb_base + offset;
+                let backing   = PAGE_PRESENT | PAGE_WRITE | PAGE_NX | fb_phys;
+                let virt_addr = VirtAddr(virt_addr.0 + offset);
 
-            page_table.map_raw(&mut mm::PhysicalMemory, virt_addr, PageType::Page4K,
-                               backing, true, false)
-                .expect("Failed to map framebuffer to the virtual memory.");
-        }
+                page_table.map_raw(&mut mm::PhysicalMemory, virt_addr, PageType::Page4K,
+                                   backing, true, false)
+                    .expect("Failed to map framebuffer to the virtual memory.");
+            }
 
-        let buffer_ptr  = virt_addr.0 as *mut u32;
-        let buffer_size = (info.fb_size as usize) / core::mem::size_of::<u32>();
-        let buffer      = core::slice::from_raw_parts_mut(buffer_ptr, buffer_size);
+            let buffer_ptr  = virt_addr.0 as *mut u32;
+            let buffer_size = (info.fb_size as usize) / core::mem::size_of::<u32>();
+
+            core::slice::from_raw_parts_mut(buffer_ptr, buffer_size)
+        };
 
         let mut white = 0;
 
@@ -71,6 +116,8 @@ impl Framebuffer {
             _ => ColorMode::Custom,
         };
 
+        let buffer_size = mmio.len();
+
         Self {
             width:               info.width  as usize,
             height:              info.height as usize,
@@ -81,14 +128,17 @@ impl Framebuffer {
             _format: info.pixel_format,
             color_mode,
 
-            buffer,
+            mmio,
+            buffer: vec![0u32; buffer_size].into_boxed_slice(),
         }
     }
 
     fn clear(&mut self, color: u32) {
         for index in 0..self.buffer.len() {
+            self.buffer[index] = color;
+
             unsafe {
-                core::ptr::write_volatile(&mut self.buffer[index], color);
+                core::ptr::write_volatile(&mut self.mmio[index], color);
             }
         }
     }
@@ -99,8 +149,10 @@ impl Framebuffer {
 
         let index = x + self.pixels_per_scanline * y;
 
+        self.buffer[index] = color;
+
         unsafe {
-            core::ptr::write_volatile(&mut self.buffer[index], color);
+            core::ptr::write_volatile(&mut self.mmio[index], color);
         }
     }
 
@@ -238,51 +290,48 @@ impl TextFramebuffer {
             // Move every line one line up (except the first one).
             // Because we don't have optimized memcpy we will manually copy pixels in framebuffer.
             // As there is overlap and source > destination we need to copy forwards.
-            unsafe {
-                let from_ptr: *mut u32 = &mut self.framebuffer.buffer[from_start];
-                let to_ptr:   *mut u32 = &mut self.framebuffer.buffer[to_start];
 
-                if copy_size & 1 == 0 {
-                    asm!(
-                        "rep movsq",
-                        inout("rsi") from_ptr      => _,
-                        inout("rdi") to_ptr        => _,
-                        inout("rcx") copy_size / 2 => _,
-                    );
-                } else {
-                    asm!(
-                        "rep movsd",
-                        inout("rsi") from_ptr  => _,
-                        inout("rdi") to_ptr    => _,
-                        inout("rcx") copy_size => _,
-                    );
+            /*
+            for index in 0..copy_size {
+                let from_index = from_start + index;
+                let to_index   = to_start   + index;
+
+                // Get the `from` value from read buffer to avoid expensive MMIO read.
+                let value = self.framebuffer.read_buffer[from_index];
+
+                // Copy the value to the read buffer.
+                self.framebuffer.read_buffer[to_index] = value;
+
+                // Copy the value to normal framebuffer.
+                unsafe {
+                    core::ptr::write_volatile(&mut self.framebuffer.buffer[to_index], value);
                 }
+            }
+            */
+
+            unsafe {
+                let _from_ptr: *mut u32 = &mut self.framebuffer.mmio[from_start];
+                let to_ptr:    *mut u32 = &mut self.framebuffer.mmio[to_start];
+
+                let from_ptr_buffer: *mut u32 = &mut self.framebuffer.buffer[from_start];
+                let to_ptr_buffer:   *mut u32 = &mut self.framebuffer.buffer[to_start];
+
+                copy_32(from_ptr_buffer, to_ptr,        copy_size);
+                copy_32(from_ptr_buffer, to_ptr_buffer, copy_size);
             }
 
             // Clear the last line.
             let clear_y     = self.height - 1;
             let clear_start = clear_y * pixels_per_line;
             let clear_size  = pixels_per_line;
-            let clear_value = (self.background as u64) << 32 | (self.background as u64);
+            let clear_value = self.background;
 
             unsafe {
-                let clear_ptr: *mut u32 = &mut self.framebuffer.buffer[clear_start];
+                let clear_ptr:       *mut u32 = &mut self.framebuffer.mmio[clear_start];
+                let clear_ptr_buffer: *mut u32 = &mut self.framebuffer.buffer[clear_start];
 
-                if clear_size & 1 == 0 {
-                    asm!(
-                        "rep stosq",
-                        in("rax")    clear_value,
-                        inout("rdi") clear_ptr      => _,
-                        inout("rcx") clear_size / 2 => _,
-                    );
-                } else {
-                    asm!(
-                        "rep stosd",
-                        in("rax")    clear_value,
-                        inout("rdi") clear_ptr  => _,
-                        inout("rcx") clear_size => _,
-                    );
-                }
+                set_32(clear_ptr,       clear_value);
+                set_32(clear_ptr_buffer, clear_value);
             }
 
             // Move cursor one line up.

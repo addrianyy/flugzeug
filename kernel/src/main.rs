@@ -66,6 +66,10 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
 
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");
+
+        for i in 0.. {
+            color_println!(0xff00ff, "running {} ......", i);
+        }
     }
 
     cpu::halt();
