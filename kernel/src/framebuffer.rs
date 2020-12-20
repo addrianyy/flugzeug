@@ -9,12 +9,28 @@ pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
 
 unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
-    if size & 1 == 0 {
+    if (size * 4) & 31 == 0 {
+        /*
         asm!(
             "rep movsq",
             inout("rsi") from     => _,
             inout("rdi") to       => _,
             inout("rcx") size / 2 => _,
+        );
+        */
+        asm!(
+            r#"
+                2:
+                vmovdqu ymm0, [rsi]
+                vmovdqu [rdi], ymm0
+                add rsi, 32
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            "#,
+            inout("rsi") from     => _,
+            inout("rdi") to       => _,
+            inout("rcx") size * 4 => _,
         );
     } else {
         asm!(

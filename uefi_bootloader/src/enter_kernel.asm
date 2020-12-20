@@ -129,6 +129,7 @@ enter_kernel:
     or  rax, (1 <<  9) ; OSFXSR
     or  rax, (1 << 10) ; OSXMMEXCPT
     or  rax, (1 <<  5) ; PAE
+    or  rax, (1 << 18) ; OSXSAVE
     mov cr4, rax
 
     ; Enable paging, write protect and some other less important stuff.
@@ -138,6 +139,14 @@ enter_kernel:
     or  eax,  (1 << 16) ; Write protect
     or  eax,  (1 << 31) ; Paging enable
     mov cr0, rax
+
+    ; Enable x87, SSE and AVX.
+    xor rax, rax
+    xor rcx, rcx
+    or  rax, (1 << 0) ; x87
+    or  rax, (1 << 1) ; SSE
+    or  rax, (1 << 2) ; AVX
+    xsetbv
 
     ; We are currently executing code in identity map. Because kernel provides only
     ; linear map, we need to switch to it. It's as simple as adding `Physical region base`

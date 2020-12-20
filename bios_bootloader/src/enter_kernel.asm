@@ -30,6 +30,7 @@ enter_kernel:
     or  eax, (1 <<  9) ; OSFXSR
     or  eax, (1 << 10) ; OSXMMEXCPT
     or  eax, (1 <<  5) ; PAE
+    or  eax, (1 << 18) ; OSXSAVE
     mov cr4, eax
 
     ; Enable paging, write protect and some other less important stuff.
@@ -39,6 +40,14 @@ enter_kernel:
     or  eax,  (1 << 16) ; Write protect
     or  eax,  (1 << 31) ; Paging enable
     mov cr0, eax
+
+    ; Enable x87, SSE and AVX.
+    xor eax, eax
+    xor ecx, ecx
+    or  eax, (1 << 0) ; x87
+    or  eax, (1 << 1) ; SSE
+    or  eax, (1 << 2) ; AVX
+    xsetbv
 
     ; Switch CPU to long mode.
     jmp 0x08:.entry_64
