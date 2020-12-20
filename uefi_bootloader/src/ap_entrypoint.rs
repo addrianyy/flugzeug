@@ -46,8 +46,8 @@ impl APEntrypoint {
     pub unsafe fn finalize_and_register(&mut self, trampoline_cr3: u64) {
         let code_buffer = &mut self.code_buffer;
 
-        let code_address:   u32 = self.code_address.try_into().expect("AP entrypoint > 4GB");
-        let trampoline_cr3: u32 = trampoline_cr3.try_into().expect("Trampoline CR3 > 4GB");
+        let code_address:   u32 = self.code_address.try_into().expect("AP entrypoint > 4GB.");
+        let trampoline_cr3: u32 = trampoline_cr3.try_into().expect("Trampoline CR3 > 4GB.");
 
         // Make sure that AP entrypoint starts with:
         //   mov eax, 0xaabbccdd
@@ -81,13 +81,15 @@ impl APEntrypoint {
             }}
         }
 
+        // Don't change this without changing `ap_entrypoint.asm`.
+
         // trampoline_cr3:        dq 0
         write!(trampoline_cr3 as u64);
 
         // bootloader_entrypoint: dq 0
         write!(crate::efi_main as *const () as u64);
 
-        // Make sure we have written expected amount of bytes.
+        // Make sure that we have filled whole region skipped by the jump.
         assert_eq!(current_offset, jmp_target_offset,
                    "Data area in AP entrypoint was corrupted.");
 

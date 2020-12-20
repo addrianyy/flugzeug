@@ -1,9 +1,15 @@
 [org  0]
 [bits 16]
 
+; We don't know our base address at compile time so every memory access needs to add code base.
+
+; `ap_entrypoint.rs` will expect this instruction sequence.
+; It will modify `0xaabbccdd` to be our code base address.
 mov eax, 0xaabbccdd
 jmp entry_16
 
+; Don't change this without changing `ap_entrypoint.rs`.
+; This will be filled in.
 trampoline_cr3:        dq 0
 bootloader_entrypoint: dq 0
 
@@ -53,6 +59,7 @@ entry_16:
     or  eax, 1 << 0
     mov cr0, eax
 
+    ; Get absolute address of 32 bit entrypoint.
     mov eax, entry_32
     add eax, ebx
 
@@ -76,8 +83,8 @@ entry_32:
     mov esp, ebx
     sub esp, 0x10
 
-    ; Offset pointer to GDT by base address.
-    ; Upper 32 bits are guaranteed to be zero.
+    ; Offset pointer to GDT by base address.  Upper 32 bits of the pointer are 
+    ; guaranteed to be zero.
     mov eax, gdt_64
     add eax, ebx
     mov dword [ebx + gdt_64.pointer], eax
@@ -91,7 +98,8 @@ entry_32:
     or eax, 1 << 8
     wrmsr
 
-    ; Load page tables.
+    ; Load page table. It will contain first 4GB of memory and bootloader mapped in.
+    ; Even though `trampoline_cr3` is qword it is guaranteed to be in lower 4GB of memory.
     mov eax, [ebx + trampoline_cr3]
     mov cr3, eax
 
@@ -105,10 +113,11 @@ entry_32:
     or  eax, 1 << 31
     mov cr0, eax
 
+    ; Get absolute address of 64 bit entrypoint.
     mov eax, entry_64
     add eax, ebx
 
-    ; Enter 32 bit mode. Normal far jump cannot be used because it uses absolute destination.
+    ; Enter 64 bit mode. Normal far jump cannot be used because it uses absolute destination.
     pushfd            ; EFLAGS
     push dword 0x08   ; CS
     push dword eax    ; EIP
@@ -124,7 +133,7 @@ entry_64:
     mov fs, ax
     mov gs, ax
 
-    ; Clear upper 32 bits of base address.
+    ; Clear upper 32 bits of our base address.
     mov ebx, ebx
 
     ; Set stack pointer to base address - 0x40. (To comply with Microsoft calling convention.)
@@ -135,7 +144,7 @@ entry_64:
     xor rcx, rcx
     xor rdx, rdx
 
-    ; Call the bootloader entrypoint.
+    ; Call the bootloader entrypoint. It is guaranteed to be mapped in `trampoline_cr3`.
     call [rbx + bootloader_entrypoint]
 
     ; We should never return here.
@@ -154,8 +163,9 @@ gdt_32:
     .register:
         dw (.register - gdt_32) - 1
 
+    ; Code must change this.
     .pointer:
-        dd gdt_32
+        dd 0
 
 
 ; GDT used to enter long mode.
@@ -168,5 +178,6 @@ gdt_64:
     .register:
         dw (.register - gdt_64) - 1
 
+    ; Code must change this.
     .pointer:
-        dq gdt_64
+        dq 0
