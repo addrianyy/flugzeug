@@ -1,4 +1,4 @@
-// Preferred framebuffer resolutions with desceonding order of priority.
+// Preferred framebuffer resolutions with descending order of priority.
 pub const PREFERRED_RESOLUTIONS: &[(u32, u32)] = &[
     (1920, 1080),
     (1920, 1200),

@@ -207,9 +207,8 @@ pub struct EfiPixelBitmask {
 
 pub type EfiGraphicsPixelFormat = u32;
 
-pub const PIXEL_RGB:     u32 = 0;
-pub const PIXEL_BGR:     u32 = 1;
-pub const PIXEL_BITMASK: u32 = 2;
+pub const PIXEL_RGB: u32 = 0;
+pub const PIXEL_BGR: u32 = 1;
 
 #[repr(C)]
 pub struct EfiGraphicsOutputModeInformation {

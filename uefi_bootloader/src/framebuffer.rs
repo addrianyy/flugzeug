@@ -1,13 +1,12 @@
 use crate::{efi, framebuffer_resolutions, BOOT_BLOCK};
+use efi::EfiGuid;
 
 pub unsafe fn initialize(system_table: *mut efi::EfiSystemTable) {
-    use efi::EfiGuid;
-
     const EFI_GOP_GUID: EfiGuid =
         EfiGuid(0x9042a9de, 0x23dc, 0x4a38, [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a]);
 
     fn is_pixel_format_usable(format: efi::EfiGraphicsPixelFormat) -> bool {
-        matches!(format, efi::PIXEL_RGB | efi::PIXEL_BGR | efi::PIXEL_BITMASK)
+        matches!(format, efi::PIXEL_RGB | efi::PIXEL_BGR)
     }
 
     let mut protocol = 0;
@@ -53,20 +52,13 @@ pub unsafe fn initialize(system_table: *mut efi::EfiSystemTable) {
             continue;
         }
 
-        let has_preferred_format = matches!(info.pixel_format, efi::PIXEL_RGB | efi::PIXEL_BGR);
-        let resolution           = (info.horizontal_res, info.vertical_res);
+        let resolution = (info.horizontal_res, info.vertical_res);
 
         if let Some(index) = preferred_resolutions.iter().position(|r| *r == resolution) {
             // Pick one with higher priority (lower index).
             let is_better = match best_mode {
-                Some((other_index, _)) => {
-                    if index == other_index {
-                        has_preferred_format
-                    } else {
-                        index < other_index
-                    }
-                }
-                None => true,
+                Some((other_index, _)) => index < other_index,
+                None                   => true,
             };
 
             if is_better {
@@ -77,24 +69,13 @@ pub unsafe fn initialize(system_table: *mut efi::EfiSystemTable) {
 
             // Pick one with higher pixel count.
             let is_better = match dense_mode {
-                Some((other_pixels, _)) => {
-                    if pixels == other_pixels {
-                        has_preferred_format
-                    } else {
-                        pixels > other_pixels
-                    }
-                }
-                None => true,
+                Some((other_pixels, _)) => pixels > other_pixels,
+                None                    => true,
             };
 
             if is_better {
                 dense_mode = Some((pixels, mode));
             }
-        }
-
-        if false {
-            println!("{}x{}; pixel format {}.", info.horizontal_res, info.vertical_res,
-                     info.pixel_format);
         }
 
         if (supported_modes.count as usize) >= boot_block::MAX_SUPPORTED_MODES {
@@ -106,9 +87,14 @@ pub unsafe fn initialize(system_table: *mut efi::EfiSystemTable) {
 
             supported_modes.count += 1;
         }
+
+        if false {
+            println!("{}x{}; pixel format {}.", info.horizontal_res, info.vertical_res,
+                     info.pixel_format);
+        }
     }
 
-    // Inform the kernel about supported framebuffer formats.
+    // Inform the kernel about supported framebuffer modes.
     *BOOT_BLOCK.supported_modes.lock() = Some(supported_modes);
 
     // If we haven't found any of the preferred modes than pick one with highest pixel count.
@@ -118,7 +104,7 @@ pub unsafe fn initialize(system_table: *mut efi::EfiSystemTable) {
 
     if let Some((_, best_mode)) = best_mode {
         assert!((protocol.set_mode)(protocol, best_mode) == 0,
-                "Failed to switch to preferred FB mode.");
+                "Failed to switch to preferred framebuffer mode.");
     }
 
     let mode      = &(*protocol.mode);
@@ -146,11 +132,6 @@ pub unsafe fn initialize(system_table: *mut efi::EfiSystemTable) {
             format.green = 0x00ff00;
             format.blue  = 0x0000ff;
         }
-        efi::PIXEL_BITMASK => {
-            format.red   = mode_info.pixel_info.red;
-            format.green = mode_info.pixel_info.green;
-            format.blue  = mode_info.pixel_info.blue;
-        }
         _ => unreachable!(),
     }
 
@@ -165,4 +146,3 @@ pub unsafe fn initialize(system_table: *mut efi::EfiSystemTable) {
 
     *BOOT_BLOCK.framebuffer.lock() = Some(framebuffer_info);
 }
-
