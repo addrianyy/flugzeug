@@ -1,9 +1,9 @@
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use alloc::collections::btree_set::BTreeSet;
 
-use crate::mm;
 use page_table::PhysAddr;
 use acpi::Header;
+use crate::mm;
 
 /// Maximum number of cores allowed on the system.
 pub const MAX_CORES: usize = 1024;
@@ -80,9 +80,10 @@ pub unsafe fn notify_core_online() {
     CORES_ONLINE.fetch_add(1, Ordering::SeqCst);
 
     // Wait for all cores to become online.
-    while CORES_ONLINE.load(Ordering::SeqCst) != total_cores() {}
+    while CORES_ONLINE.load(Ordering::SeqCst) != total_cores() {
+        core::sync::atomic::spin_loop_hint();
+    }
 }
-
 
 unsafe fn parse_header(phys_addr: PhysAddr) -> (Header, PhysAddr, usize) {
     let header: Header = mm::read_phys_unaligned(phys_addr);
@@ -92,7 +93,7 @@ unsafe fn parse_header(phys_addr: PhysAddr) -> (Header, PhysAddr, usize) {
 
     // Get the table size.
     let payload_size = header.length.checked_sub(core::mem::size_of::<Header>() as u32)
-        .expect("ACPI pyload size undeflowed.");
+        .expect("ACPI payload size has undeflowed.");
 
     // Calculate table checkum.
     let checksum = (phys_addr.0..phys_addr.0 + header.length as u64)
@@ -274,10 +275,10 @@ pub unsafe fn initialize() {
         let ap_entrypoint = ap_entrypoint.expect("No AP entrypoint.");
 
         // Calculate the SIPI vector which will cause APs to start
-        // execution at the `AP_ENTRYPOINT`.
+        // execution at the `ap_entrypoint`.
         let sipi_vector = (ap_entrypoint / 0x1000) & 0xff;
 
-        // Make sure that the `AP_ENTRYPOINT` is encodable in SIPI vector.
+        // Make sure that the `ap_entrypoint` is encodable in SIPI vector.
         assert!(sipi_vector * 0x1000 == ap_entrypoint, "AP entrypoint {:x} cannot be encoded.",
                 ap_entrypoint);
 
@@ -296,7 +297,7 @@ pub unsafe fn initialize() {
         // Wait for the core to become online. Bootloader is not thread safe so there can
         // be only one launching AP at a time.
         while core_state(apic_id) != CoreState::Online {
-            cpu::pause();
+            core::sync::atomic::spin_loop_hint();
         }
     }
 }

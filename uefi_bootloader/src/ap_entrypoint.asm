@@ -77,6 +77,7 @@ entry_32:
     sub esp, 0x10
 
     ; Offset pointer to GDT by base address.
+    ; Upper 32 bits are guaranteed to be zero.
     mov eax, gdt_64
     add eax, ebx
     mov dword [ebx + gdt_64.pointer], eax
@@ -168,4 +169,4 @@ gdt_64:
         dw (.register - gdt_64) - 1
 
     .pointer:
-        dd gdt_64
+        dq gdt_64

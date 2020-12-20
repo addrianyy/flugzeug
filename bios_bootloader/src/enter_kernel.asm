@@ -92,4 +92,4 @@ gdt_64:
     dq 0x0000920000000000 ; Data segment.
     .r:
         dw (.r - gdt_64) - 1
-        dd gdt_64
+        dq gdt_64

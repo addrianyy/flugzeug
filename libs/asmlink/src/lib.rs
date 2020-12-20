@@ -12,7 +12,8 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
     // Tell Rust that libraries that we will link to can be found in the `out_dir` path.
     println!("cargo:rustc-link-search={}", out_dir);
 
-    let out_dir = Path::new(&out_dir);
+    let out_dir    = Path::new(&out_dir);
+    let is_windows = format.contains("win");
 
     let mut compiled_libraries = HashSet::new();
 
@@ -30,7 +31,6 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
 
         // Object file will have a name `name.obj`.
         let object_file = out_dir.join(libname).with_extension("obj");
-        let is_windows  = format.contains("win");
 
         // Convert `Path`s to UTF-8 strings.
         let source_file  = source_file.to_str().unwrap();

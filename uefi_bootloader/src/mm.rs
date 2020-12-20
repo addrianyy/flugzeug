@@ -4,7 +4,7 @@ use core::alloc::Layout;
 use rangeset::{RangeSet, Range};
 use page_table::{PhysMem, PhysAddr};
 use lock::Lock;
-use crate::{BOOT_BLOCK, efi};
+use crate::{BOOT_BLOCK, efi, binaries};
 
 // When handling APs we will have only first 4GB mapped in.
 pub const MAX_ADDRESS: usize = 0xffff_ffff;
@@ -249,8 +249,8 @@ pub unsafe fn initialize_and_exit_boot_services(image_handle: usize,
 
         // Bootloader contains kernel binary which is not used after booting but takes a 
         // lot of space. Readd it to boot memory.
-        let binary_base = crate::KERNEL.as_ptr() as usize as u64;
-        let binary_end  = binary_base + (crate::KERNEL.len() as u64) - 1;
+        let binary_base = binaries::KERNEL.as_ptr() as usize as u64;
+        let binary_end  = binary_base + (binaries::KERNEL.len() as u64) - 1;
         boot_memory.insert(Range {
             start: binary_base,
             end:   binary_end,
