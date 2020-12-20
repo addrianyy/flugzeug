@@ -1,3 +1,5 @@
+pub const USE_SERIAL: bool = false;
+
 #[macro_export]
 macro_rules! print {
     ($($arg: tt)*) => {{
@@ -20,10 +22,12 @@ macro_rules! color_print {
     ($color: expr, $($arg: tt)*) => {{
         let color: u32 = $color;
 
-        let mut serial = core!().boot_block.serial_port.lock();
-        let     serial = serial.as_mut().unwrap();
+        if crate::print::USE_SERIAL {
+            let mut serial = core!().boot_block.serial_port.lock();
+            let     serial = serial.as_mut().unwrap();
 
-        let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
+            let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
+        }
 
         // Print to framebuffer if it is available.
         if let Some(framebuffer) = crate::framebuffer::get().lock().as_mut() {
@@ -48,11 +52,13 @@ macro_rules! color_println {
     ($color: expr, $($arg: tt)*) => {{
         let color: u32 = $color;
 
-        let mut serial = core!().boot_block.serial_port.lock();
-        let     serial = serial.as_mut().unwrap();
+        if crate::print::USE_SERIAL {
+            let mut serial = core!().boot_block.serial_port.lock();
+            let     serial = serial.as_mut().unwrap();
 
-        let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
-        let _ = core::fmt::Write::write_str(serial, "\n");
+            let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
+            let _ = core::fmt::Write::write_str(serial, "\n");
+        }
 
         // Print to framebuffer if it is available.
         if let Some(framebuffer) = crate::framebuffer::get().lock().as_mut() {

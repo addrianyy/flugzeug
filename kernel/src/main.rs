@@ -18,6 +18,12 @@ mod interrupts_misc;
 
 use page_table::PhysAddr;
 
+fn rdtsc() -> u64 {
+    unsafe {
+        core::arch::x86_64::_rdtsc()
+    }
+}
+
 #[no_mangle]
 extern "C" fn _start(boot_block: PhysAddr) -> ! {
     // Make sure that LLVM data layout isn't broken.
@@ -67,8 +73,14 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");
 
+        let mut diff = 0;
+
         for i in 0.. {
-            color_println!(0xff00ff, "running {} ......", i);
+            let tsc = rdtsc();
+
+            color_println!(0xff00ff, "running {} ({}K)......", i, diff / 1000);
+
+            diff = rdtsc() - tsc;
         }
     }
 

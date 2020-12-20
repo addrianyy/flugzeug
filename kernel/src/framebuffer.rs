@@ -1,5 +1,5 @@
 use boot_block::{FramebufferInfo, PixelFormat};
-use page_table::{PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_CACHE_DISABLE, PAGE_NX, VirtAddr};
+use page_table::{PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_NX, VirtAddr};
 use crate::{mm, font};
 use lock::Lock;
 use alloc::{vec, boxed::Box};
@@ -8,7 +8,7 @@ pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 
 static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
 
-unsafe fn copy_32(from: *mut u32, to: *mut u32, size: usize) {
+unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
     if size & 1 == 0 {
         asm!(
             "rep movsq",
@@ -82,7 +82,7 @@ impl Framebuffer {
             // Map framebuffer into virtual memory.
             for offset in (0..aligned_size).step_by(4096) {
                 // PAGE_CACHE_DISABLE doesn't seem to be needed here and enabling it causes
-                // huge slowdown.
+                // huge slowdown on VM.
                 let fb_phys   = info.fb_base + offset;
                 let backing   = PAGE_PRESENT | PAGE_WRITE | PAGE_NX | fb_phys;
                 let virt_addr = VirtAddr(virt_addr.0 + offset);
@@ -134,25 +134,23 @@ impl Framebuffer {
     }
 
     fn clear(&mut self, color: u32) {
-        for index in 0..self.buffer.len() {
-            self.buffer[index] = color;
+        let clear_size = self.buffer.len();
 
-            unsafe {
-                core::ptr::write_volatile(&mut self.mmio[index], color);
-            }
+        unsafe {
+            set_32(self.mmio.as_mut_ptr(),   color, clear_size);
+            set_32(self.buffer.as_mut_ptr(), color, clear_size);
         }
     }
 
-    fn set_pixel(&mut self, x: usize, y: usize, color: u32) {
-        assert!(x < self.width,  "X coordinate is out of bounds.");
-        assert!(y < self.height, "Y coordinate is out of bounds.");
+    fn set_pixels_in_line(&mut self, x: usize, y: usize, colors: &[u32]) {
+        assert!(x + colors.len() < self.width,  "X coordinate is out of bounds.");
+        assert!(y                < self.height, "Y coordinate is out of bounds.");
 
-        let index = x + self.pixels_per_scanline * y;
-
-        self.buffer[index] = color;
+        let index = self.pixels_per_scanline * y + x;
 
         unsafe {
-            core::ptr::write_volatile(&mut self.mmio[index], color);
+            copy_32(colors.as_ptr(), self.mmio[index..].as_mut_ptr(),   colors.len());
+            copy_32(colors.as_ptr(), self.buffer[index..].as_mut_ptr(), colors.len());
         }
     }
 
@@ -207,14 +205,17 @@ impl Font {
         let char_data = &self.data[index..][..self.height];
 
         for oy in 0..self.height {
-            let line_data = char_data[oy];
+            let line_data  = char_data[oy];
+            let mut colors = [0u32; 8];
 
             for ox in 0..self.width {
                 let set   = line_data & (1 << (7 - ox)) != 0;
                 let color = if set { foreground } else { background };
 
-                framebuffer.set_pixel(x + ox + self.x_padding, y + oy + self.y_padding, color);
+                colors[ox] = color;
             }
+
+            framebuffer.set_pixels_in_line(x + self.x_padding, y + oy + self.y_padding, &colors);
         }
     }
 }
@@ -235,7 +236,6 @@ pub struct TextFramebuffer {
 
 impl TextFramebuffer {
     fn new(framebuffer: Framebuffer, font: Font) -> Self {
-
         let width  = framebuffer.width  / font.visual_width;
         let height = framebuffer.height / font.visual_height;
         
@@ -288,27 +288,7 @@ impl TextFramebuffer {
             let copy_size  = (self.height - 1) * pixels_per_line;
             
             // Move every line one line up (except the first one).
-            // Because we don't have optimized memcpy we will manually copy pixels in framebuffer.
             // As there is overlap and source > destination we need to copy forwards.
-
-            /*
-            for index in 0..copy_size {
-                let from_index = from_start + index;
-                let to_index   = to_start   + index;
-
-                // Get the `from` value from read buffer to avoid expensive MMIO read.
-                let value = self.framebuffer.read_buffer[from_index];
-
-                // Copy the value to the read buffer.
-                self.framebuffer.read_buffer[to_index] = value;
-
-                // Copy the value to normal framebuffer.
-                unsafe {
-                    core::ptr::write_volatile(&mut self.framebuffer.buffer[to_index], value);
-                }
-            }
-            */
-
             unsafe {
                 let _from_ptr: *mut u32 = &mut self.framebuffer.mmio[from_start];
                 let to_ptr:    *mut u32 = &mut self.framebuffer.mmio[to_start];
@@ -316,22 +296,25 @@ impl TextFramebuffer {
                 let from_ptr_buffer: *mut u32 = &mut self.framebuffer.buffer[from_start];
                 let to_ptr_buffer:   *mut u32 = &mut self.framebuffer.buffer[to_start];
 
+                // Move lines up in both MMIO and buffer. For MMIO we use buffer as
+                // a source to avoid expensive MMIO read.
                 copy_32(from_ptr_buffer, to_ptr,        copy_size);
                 copy_32(from_ptr_buffer, to_ptr_buffer, copy_size);
             }
 
-            // Clear the last line.
             let clear_y     = self.height - 1;
             let clear_start = clear_y * pixels_per_line;
             let clear_size  = pixels_per_line;
             let clear_value = self.background;
 
+            // Clear the last line.
             unsafe {
-                let clear_ptr:       *mut u32 = &mut self.framebuffer.mmio[clear_start];
+                let clear_ptr:        *mut u32 = &mut self.framebuffer.mmio[clear_start];
                 let clear_ptr_buffer: *mut u32 = &mut self.framebuffer.buffer[clear_start];
 
-                set_32(clear_ptr,       clear_value);
-                set_32(clear_ptr_buffer, clear_value);
+                // Clear both MMIO and buffer.
+                set_32(clear_ptr,        clear_value, clear_size);
+                set_32(clear_ptr_buffer, clear_value, clear_size);
             }
 
             // Move cursor one line up.
