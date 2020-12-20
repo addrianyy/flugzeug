@@ -31,7 +31,7 @@ static NEXT_STACK_ADDRESS: Lock<u64> = Lock::new(KERNEL_STACK_BASE);
 /// only touch first 4GB of memory when launching APs.
 const TRAMPOLINE_PHYSICAL_REGION_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 
-/// Creates a unique kernel stack required for entering the kernel.
+/// Creates a unique kernel stack required to enter the kernel. Returns stack end, not stack base.
 fn create_kernel_stack() -> u64 {
     // It is possible that the kernel uses free memory memory list or page tables too.
     // This is fine as everything is locked.
@@ -61,7 +61,7 @@ fn create_trampoline_page_table(page_type: PageType) -> PageTable {
     /// Map `phys_addr` at virtual address `phys_addr` and virtual address
     /// `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`. This mapping will be both
     /// writable and executable.
-    fn map(page_table: &mut PageTable, phys_addr: u64, page_type: PageType) {
+    fn identity_map(page_table: &mut PageTable, phys_addr: u64, page_type: PageType) {
         let page_mask = page_type as u64 - 1;
 
         assert!(phys_addr & page_mask == 0, "Cannot map unaligned \
@@ -80,8 +80,8 @@ fn create_trampoline_page_table(page_type: PageType) -> PageTable {
             }
 
             unsafe {
-                page_table.map_raw(&mut BootPhysicalMemory, virt_addr, page_type,
-                                   backing, true, false)
+                page_table.map_raw(&mut BootPhysicalMemory, virt_addr, page_type, backing,
+                                   true, false)
                     .expect("Failed to map memory to the trampoline page table.");
             }
         }
@@ -98,7 +98,8 @@ fn create_trampoline_page_table(page_type: PageType) -> PageTable {
     assert!(mm::MAX_ADDRESS + 1 == TRAMPOLINE_PHYSICAL_REGION_SIZE as usize,
             "Trampoline PT size doesn't match with MM max address.");
 
-    assert!(KERNEL_PHYSICAL_REGION_SIZE >= TRAMPOLINE_PHYSICAL_REGION_SIZE);
+    assert!(KERNEL_PHYSICAL_REGION_SIZE >= TRAMPOLINE_PHYSICAL_REGION_SIZE,
+            "Trampoline PR doesn't fit in kernel PR.");
 
     // Allocate a page table that will be used when transitioning to the kernel.
     // We should use `BootPhysicalMemory` with it because it won't be needed after
@@ -108,15 +109,19 @@ fn create_trampoline_page_table(page_type: PageType) -> PageTable {
 
     // Identity map first `TRAMPOLINE_PHYSICAL_REGION_SIZE` bytes of physical memory.
     for phys_addr in (0..TRAMPOLINE_PHYSICAL_REGION_SIZE).step_by(page_size as usize) {
-        map(&mut trampoline_page_table, phys_addr, page_type);
+        identity_map(&mut trampoline_page_table, phys_addr, page_type);
     }
 
     let bootloader = mm::bootloader_image();
 
-    // Map in bootloader image to the trampoline page table.
+    // Map in bootloader image to the trampoline page table. (As it can be in > 4GB memory.)
     for offset in (0..bootloader.size).step_by(4096) {
         let phys_addr   = (bootloader.base + offset) as u64;
         let max_address = mm::MAX_ADDRESS as u64;
+
+        // Make sure that bootloader will be mapped in the kernel physical region.
+        assert!(phys_addr + 4095 < KERNEL_PHYSICAL_REGION_SIZE,
+                "Bootloader won't be mapped in the kernel physical region.");
 
         // If this page is < 4GB it is already mapped in.
         if phys_addr <= max_address {
@@ -124,7 +129,7 @@ fn create_trampoline_page_table(page_type: PageType) -> PageTable {
         }
 
         // Map this page using small 4K pages.
-        map(&mut trampoline_page_table, phys_addr, PageType::Page4K);
+        identity_map(&mut trampoline_page_table, phys_addr, PageType::Page4K);
     }
 
     trampoline_page_table
@@ -183,6 +188,7 @@ fn create_kernel_page_table(kernel: &Elf, page_type: PageType) -> PageTable {
         ).expect("Failed to map kernel segment.");
     });
 
+    // Create linear physical memory map used by the kernel.
     let page_size = page_type as u64;
     let page_mask = page_size - 1;
 
@@ -209,8 +215,7 @@ fn create_kernel_page_table(kernel: &Elf, page_type: PageType) -> PageTable {
         }
 
         unsafe {
-            kernel_page_table.map_raw(&mut PhysicalMemory, virt_addr, page_type, raw,
-                                      true, false)
+            kernel_page_table.map_raw(&mut PhysicalMemory, virt_addr, page_type, raw, true, false)
                 .expect("Failed to map physical region in the kernel page table.");
         }
     }
@@ -233,18 +238,32 @@ fn load_kernel() -> KernelEntryData {
 
     let features = cpu::get_features();
 
+    // Determine max supported page size.
     let max_page_type = if features.page1g {
         PageType::Page1G
     } else if features.page2m {
         PageType::Page2M
     } else {
-        panic!("System doesn not support 2M or 1G pages.");
+        panic!("System doesn't support 2M or 1G pages.");
     };
+
+    // Bootloader uses identity physical memory map, but kernel will use linear physical
+    // memory map that starts at `KERNEL_PHYSICAL_REGION_BASE`.
+    // To be able to transition to the kernel we need to a allocate trampoline page table that
+    // will map physical address 0 to virtual address 0 (like in bootloader) and
+    // physical address 0 to virtual address `KERNEL_PHYSICAL_REGION_SIZE` (like in kernel).
+
+    // Transition code will work like this:
+    // 1. Bootloader executes `enter_kernel`. Enable long mode and setup paging with trampoline
+    //    page table.
+    // 2. Jump to the next part of `enter_kernel`, but add `KERNEL_PHYSICAL_REGION_BASE`
+    //    to RIP in order to use kernel-valid address.
+    // 3. Switch to the actual kernel page tables, switch stack and jump to the kernel.
 
     // Create a page table that will be used when transitioning to the kernel.
     let mut trampoline_page_table = create_trampoline_page_table(max_page_type);
 
-    // Create a page table that will be used by the kernel. It will already contain
+    // Create a page table that will be used by the kernel. It will already contain a
     // mapped in kernel.
     let mut kernel_page_table = create_kernel_page_table(&kernel, max_page_type);
 

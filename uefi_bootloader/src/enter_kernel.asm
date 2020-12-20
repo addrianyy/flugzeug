@@ -139,7 +139,7 @@ enter_kernel:
     or  eax,  (1 << 31) ; Paging enable
     mov cr0, rax
 
-    ; We are currently executing code in identity map. Because kernel provides only 
+    ; We are currently executing code in identity map. Because kernel provides only
     ; linear map, we need to switch to it. It's as simple as adding `Physical region base`
     ; to the target instruction address.
     mov rax, qword [rsp + 0x30]
