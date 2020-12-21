@@ -160,7 +160,6 @@ pub unsafe fn rdmsr(msr: u32) -> u64 {
     low as u64 | (high as u64) << 32
 }
 
-
 pub unsafe fn wrmsr(msr: u32, value: u64) {
     let low:  u32 = value as u32;
     let high: u32 = (value >> 32) as u32;
@@ -202,4 +201,32 @@ pub fn get_xcr0() -> u64 {
     }
 
     low as u64 | (high as u64) << 32
+}
+
+pub unsafe fn zero_idt() {
+    #[cfg(target_pointer_width = "32")]
+    {
+        #[repr(C, packed)]
+        struct Descriptor {
+            limit: u16,
+            base:  u32,
+        }
+
+        let idt = Descriptor { limit: 0, base: 0 };
+
+        asm!("lidt [eax]", in("eax") &idt);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    {
+        #[repr(C, packed)]
+        struct Descriptor {
+            limit: u16,
+            base:  u64,
+        }
+
+        let idt = Descriptor { limit: 0, base: 0 };
+
+        asm!("lidt [rax]", in("rax") &idt);
+    }
 }

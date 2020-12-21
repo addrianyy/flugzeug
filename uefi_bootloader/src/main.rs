@@ -54,6 +54,11 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
                 "Invalid arguments passed to the bootloader.");
     }
 
+    // Zero out the IDT so if there is any exception we will triple fault.
+    unsafe {
+        cpu::zero_idt();
+    }
+
     bootlib::verify_cpu();
 
     // No allocations should be done here to ensure that we will have enough low memory

@@ -419,6 +419,11 @@ unsafe fn locate_acpi() {
 #[no_mangle]
 extern "C" fn _start(boot_disk_data: &BootDiskData,
                      boot_disk_descriptor: &BootDiskDescriptor) -> ! {
+    // Zero out the IDT so if there is any exception we will triple fault.
+    unsafe {
+        cpu::zero_idt();
+    }
+
     // Make sure that LLVM data layout isn't broken.
     assert!(core::mem::size_of::<u64>() == 8 && core::mem::align_of::<u64>() == 8,
             "U64 has invalid size/alignment.");
