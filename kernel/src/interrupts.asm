@@ -23,21 +23,22 @@ call_handler:
     push r14
     push qword [r15 + 0x18] ; R15
 
+
+    ; Save processor state.
     push rax
     push rcx
     push rdx
 
-    ; Get XCR0.
     xor rcx, rcx
     xgetbv
 
-    ; Save processor state.
     mov rcx, gs:[8]
     xsave [rcx]
-    
+
     pop rdx
     pop rcx
     pop rax
+
 
     ; Save the current stack pointer for the 4th argument (register state).
     mov rcx, rsp
@@ -54,38 +55,39 @@ call_handler:
     ; Restore the stack pointer.
     mov rsp, rbp
 
+
+    ; Restore processor state.
     push rax
     push rcx
     push rdx
 
-    ; Get XCR0.
     xor rcx, rcx
     xgetbv
 
-    ; Restore processor state.
     mov rcx, gs:[8]
     xrstor [rcx]
-    
+
     pop rdx
     pop rcx
     pop rax
 
+
     ; Restore the register state.
-    pop  qword [r15 + 0x18] ; R15
-    pop  r14
-    pop  r13
-    pop  r12
-    pop  r11
-    pop  r10
-    pop  r9
-    pop  r8
-    pop  rbp
-    pop  qword [r15 + 0x10] ; RDI
-    pop  qword [r15 + 0x08] ; RSI
-    pop  qword [r15 + 0x00] ; RDX
-    pop  rcx
-    pop  rbx
-    pop  rax
+    pop qword [r15 + 0x18] ; R15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop qword [r15 + 0x10] ; RDI
+    pop qword [r15 + 0x08] ; RSI
+    pop qword [r15 + 0x00] ; RDX
+    pop rcx
+    pop rbx
+    pop rax
 
     ret
 

@@ -1,4 +1,4 @@
-pub const USE_SERIAL: bool = false;
+pub const ALWAYS_USE_SERIAL_PORT: bool = false;
 
 #[macro_export]
 macro_rules! print {
@@ -20,14 +20,8 @@ macro_rules! println {
 #[macro_export]
 macro_rules! color_print {
     ($color: expr, $($arg: tt)*) => {{
-        let color: u32 = $color;
-
-        if crate::print::USE_SERIAL {
-            let mut serial = core!().boot_block.serial_port.lock();
-            let     serial = serial.as_mut().unwrap();
-
-            let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
-        }
+        let color: u32     = $color;
+        let mut use_serial = crate::print::ALWAYS_USE_SERIAL_PORT;
 
         // Print to framebuffer if it is available.
         if let Some(framebuffer) = crate::framebuffer::get().lock().as_mut() {
@@ -40,6 +34,15 @@ macro_rules! color_print {
             if color != crate::framebuffer::DEFAULT_FOREGROUND_COLOR {
                 framebuffer.reset_color();
             }
+        } else {
+            use_serial = true;
+        }
+
+        if use_serial {
+            let mut serial = core!().boot_block.serial_port.lock();
+            let     serial = serial.as_mut().unwrap();
+
+            let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
         }
     }};
 }
@@ -50,15 +53,8 @@ macro_rules! color_println {
         color_print!($color, "\n");
     }};
     ($color: expr, $($arg: tt)*) => {{
-        let color: u32 = $color;
-
-        if crate::print::USE_SERIAL {
-            let mut serial = core!().boot_block.serial_port.lock();
-            let     serial = serial.as_mut().unwrap();
-
-            let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
-            let _ = core::fmt::Write::write_str(serial, "\n");
-        }
+        let color: u32     = $color;
+        let mut use_serial = crate::print::ALWAYS_USE_SERIAL_PORT;
 
         // Print to framebuffer if it is available.
         if let Some(framebuffer) = crate::framebuffer::get().lock().as_mut() {
@@ -72,6 +68,16 @@ macro_rules! color_println {
             if color != crate::framebuffer::DEFAULT_FOREGROUND_COLOR {
                 framebuffer.reset_color();
             }
+        } else {
+            use_serial = true;
+        }
+
+        if use_serial {
+            let mut serial = core!().boot_block.serial_port.lock();
+            let     serial = serial.as_mut().unwrap();
+
+            let _ = core::fmt::Write::write_fmt(serial, format_args!($($arg)*));
+            let _ = core::fmt::Write::write_str(serial, "\n");
         }
     }};
 }
