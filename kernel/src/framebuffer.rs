@@ -447,9 +447,9 @@ unsafe fn dual_copy_32(from: *const u32, to1: *mut u32, to2: *mut u32, size: usi
         asm!(
             r#"
             2:
-                vmovdqu ymm0, [rsi]
-                vmovdqu [rdi], ymm0
-                vmovdqu [rbx], ymm0
+                vmovups ymm0, [rsi]
+                vmovups [rdi], ymm0
+                vmovups [rbx], ymm0
                 add rsi, 32
                 add rdi, 32
                 add rbx, 32
@@ -484,10 +484,10 @@ unsafe fn dual_set_32(target1: *mut u32, target2: *mut u32, value: u32, size: us
 
         asm!(
             r#"
-                vmovdqu ymm0, [rsi]
+                vmovups ymm0, [rsi]
             2:
-                vmovdqu [rdi], ymm0
-                vmovdqu [rbx], ymm0
+                vmovups [rdi], ymm0
+                vmovups [rbx], ymm0
                 add rdi, 32
                 add rbx, 32
                 sub rcx, 32
@@ -521,7 +521,7 @@ unsafe fn compare_32(a: *const u32, b: *const u32, size: usize) -> bool {
         asm!(
             r#"
             2:
-                vmovdqu   ymm0, [rsi]
+                vmovups   ymm0, [rsi]
                 vpcmpeqd  ymm0, ymm0, [rdi]
                 vpmovmskb eax, ymm0
 
