@@ -72,6 +72,14 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");
 
+        if let Some(mut graphics) = framebuffer::request_graphics() {
+            draw(&mut graphics);
+
+            cpu::halt();
+            framebuffer::return_graphics(graphics);
+        }
+
+        /*
         let mut diff = 0;
 
         for i in 0.. {
@@ -81,7 +89,56 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
 
             diff = time::get_tsc() - tsc;
         }
+        */
     }
 
     cpu::halt();
+}
+
+fn esacpe(pr: f32, pi: f32, max_iterations: usize) -> f32 {
+    let mut zr = pr;
+    let mut zi = pi;
+
+    for iteration in 0..max_iterations {
+        let r2 = zr * zr;
+        let i2 = zi * zi;
+
+        if r2 + i2 > 4.0 {
+            return (iteration as f32) / (max_iterations - 1) as f32;
+        }
+
+        zi = 2.0 * zr * zi + pi;
+        zr = r2 - i2 + pr;
+    }
+
+    0.0
+}
+
+fn draw(graphics: &mut framebuffer::GraphicsFramebuffer) {
+    let mut line = alloc::vec![0u32; graphics.width()];
+
+    let x0 = -1.5;
+    let y0 = -1.0;
+    let x1 = 0.5;
+    let y1 = 1.0;
+
+    let aspect_ratio = graphics.width() as f32 / graphics.height() as f32;
+
+    for y in 0..graphics.height() {
+        for x in 0..graphics.width() {
+            let u = (x as f32) / ((graphics.width()  - 1) as f32);
+            let v = (y as f32) / ((graphics.height() - 1) as f32);
+
+            let pr = (u * (x1 - x0) + x0) * aspect_ratio;
+            let pi = v * (y1 - y0) + y0;
+
+            let r = 0.0;
+            let g = 0.0;
+            let b = esacpe(pr, pi, 100);
+
+            line[x] = graphics.convert_float_color(r, g, b);
+        }
+
+        graphics.set_pixels_in_line(0, y, &line);
+    }
 }

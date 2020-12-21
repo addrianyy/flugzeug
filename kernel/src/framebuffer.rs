@@ -19,8 +19,6 @@ struct Framebuffer {
     height:              usize,
     pixels_per_scanline: usize,
 
-    black:      u32,
-    white:      u32,
     _format:    PixelFormat,
     color_mode: ColorMode,
 
@@ -60,13 +58,6 @@ impl Framebuffer {
             core::slice::from_raw_parts_mut(buffer_ptr, buffer_size)
         };
 
-        let mut white = 0;
-
-        for &mask in &[info.pixel_format.red, info.pixel_format.green,
-                       info.pixel_format.blue] {
-            white |= mask;
-        }
-
         // This is different than UEFI values.
         let color_mode = match info.pixel_format {
             PixelFormat { red: 0xff0000, green: 0x00ff00, blue: 0x0000ff } => {
@@ -85,8 +76,6 @@ impl Framebuffer {
             height:              info.height as usize,
             pixels_per_scanline: info.pixels_per_scanline as usize,
 
-            black: 0,
-            white,
             _format: info.pixel_format,
             color_mode,
 
@@ -95,7 +84,7 @@ impl Framebuffer {
         }
     }
 
-    fn clear(&mut self, color: u32) {
+    fn clear_with_buffer(&mut self, color: u32) {
         let clear_size = self.buffer.len();
 
         unsafe {
@@ -106,9 +95,9 @@ impl Framebuffer {
         }
     }
 
-    fn set_pixels_in_line(&mut self, x: usize, y: usize, colors: &[u32]) {
-        assert!(x + colors.len() < self.width,  "X coordinate is out of bounds.");
-        assert!(y                < self.height, "Y coordinate is out of bounds.");
+    fn set_pixels_in_line_with_buffer(&mut self, x: usize, y: usize, colors: &[u32]) {
+        assert!(x + colors.len() <= self.width,  "X coordinate is out of bounds.");
+        assert!(y                <  self.height, "Y coordinate is out of bounds.");
 
         let index = self.pixels_per_scanline * y + x;
 
@@ -117,6 +106,25 @@ impl Framebuffer {
                          self.mmio[index..].as_mut_ptr(),
                          self.buffer[index..].as_mut_ptr(),
                          colors.len());
+        }
+    }
+
+    fn clear(&mut self, color: u32) {
+        let clear_size = self.buffer.len();
+
+        unsafe {
+            set_32(self.mmio.as_mut_ptr(), color, clear_size);
+        }
+    }
+
+    fn set_pixels_in_line(&mut self, x: usize, y: usize, colors: &[u32]) {
+        assert!(x + colors.len() <= self.width,  "X coordinate is out of bounds.");
+        assert!(y                <  self.height, "Y coordinate is out of bounds.");
+
+        let index = self.pixels_per_scanline * y + x;
+
+        unsafe {
+            copy_32(colors.as_ptr(),self.mmio[index..].as_mut_ptr(), colors.len());
         }
     }
 
@@ -135,6 +143,40 @@ impl Framebuffer {
             }
             _ => panic!("Custom color mode framebuffers are not fully supported yet."),
         }
+    }
+}
+
+pub struct GraphicsFramebuffer {
+    inner: Framebuffer,
+}
+
+impl GraphicsFramebuffer {
+    pub fn width(&self) -> usize {
+        self.inner.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.inner.height
+    }
+
+    pub fn clear(&mut self, color: u32) {
+        self.inner.clear(color);
+    }
+
+    pub fn convert_color(&self, color: u32) -> u32 {
+        self.inner.convert_color(color)
+    }
+
+    pub fn convert_float_color(&self, r: f32, g: f32, b: f32) -> u32 {
+        let r = (r * 255.0) as u32;
+        let g = (g * 255.0) as u32;
+        let b = (b * 255.0) as u32;
+
+        self.convert_color(r << 16 | g << 8 | b)
+    }
+
+    pub fn set_pixels_in_line(&mut self, x: usize, y: usize, colors: &[u32]) {
+        self.inner.set_pixels_in_line(x, y, colors);
     }
 }
 
@@ -185,7 +227,9 @@ impl Font {
                 colors[ox] = color;
             }
 
-            framebuffer.set_pixels_in_line(x + self.x_padding, y + oy + self.y_padding, &colors);
+            framebuffer.set_pixels_in_line_with_buffer(x + self.x_padding,
+                                                       y + oy + self.y_padding,
+                                                       &colors);
         }
     }
 }
@@ -205,20 +249,17 @@ pub struct TextFramebuffer {
 }
 
 impl TextFramebuffer {
-    fn new(framebuffer: Framebuffer, font: Font) -> Self {
+    fn new(framebuffer: Framebuffer, clear: bool) -> Self {
+        let font = Font::new(&font::FONT, 8, font::HEIGHT, 1, 1);
+
         let width  = framebuffer.width  / font.visual_width;
         let height = framebuffer.height / font.visual_height;
         
         assert!(width  > 1, "Text framebuffer width must > 1.");
         assert!(height > 1, "Text framebuffer height must > 1.");
 
-        let background         = framebuffer.black;
-        let default_foreground = if DEFAULT_FOREGROUND_COLOR == 0xffffff {
-            // To support framebuffers with weird color formats.
-            framebuffer.white
-        } else {
-            framebuffer.convert_color(DEFAULT_FOREGROUND_COLOR)
-        };
+        let background         = framebuffer.convert_color(0x000000);
+        let default_foreground = framebuffer.convert_color(DEFAULT_FOREGROUND_COLOR);
 
         let mut text_fb = Self {
             font,
@@ -234,7 +275,17 @@ impl TextFramebuffer {
             background,
         };
 
-        text_fb.framebuffer.clear(text_fb.background);
+        if clear {
+            text_fb.framebuffer.clear_with_buffer(text_fb.background);
+        } else {
+            let size = text_fb.framebuffer.buffer.len();
+
+            unsafe {
+                copy_32(text_fb.framebuffer.buffer.as_ptr(),
+                        text_fb.framebuffer.mmio.as_mut_ptr(),
+                        size);
+            }
+        }
 
         text_fb
     }
@@ -397,14 +448,7 @@ pub unsafe fn initialize() {
         core!().boot_block.framebuffer.lock().clone();
 
     if let Some(framebuffer_info) = framebuffer_info {
-        // Create graphics framebuffer.
-        let framebuffer = Framebuffer::new(&framebuffer_info);
-
-        let font = Font::new(&font::FONT, 8, font::HEIGHT, 1, 1);
-
-        // Create text framebuffer which uses graphics framebuffer and our simple bitmap
-        // font.
-        let framebuffer = TextFramebuffer::new(framebuffer, font);
+        let framebuffer = TextFramebuffer::new(Framebuffer::new(&framebuffer_info), true);
 
         // Set global kernel text framebuffer.
         *kernel_framebuffer = Some(framebuffer);
@@ -436,6 +480,25 @@ pub unsafe fn initialize() {
 
 pub fn get() -> &'static Lock<Option<TextFramebuffer>> {
     &FRAMEBUFFER
+}
+
+pub fn request_graphics() -> Option<GraphicsFramebuffer> {
+    if let Some(framebuffer) = FRAMEBUFFER.lock().take() {
+        Some(GraphicsFramebuffer {
+            inner: framebuffer.framebuffer,
+        })
+    } else {
+        None
+    }
+}
+
+pub fn return_graphics(graphics: GraphicsFramebuffer) {
+    let inner                  = graphics.inner;
+    let mut kernel_framebuffer = FRAMEBUFFER.lock();
+
+    assert!(kernel_framebuffer.is_none(), "Kernel already owns framebuffer.");
+
+    *kernel_framebuffer = Some(TextFramebuffer::new(inner, false));
 }
 
 const ELEMENTS_PER_VECTOR: usize = 32 / 4;
@@ -509,6 +572,70 @@ unsafe fn dual_set_32(target1: *mut u32, target2: *mut u32, value: u32, size: us
 
             *target1.add(index) = value;
             *target2.add(index) = value;
+        }
+    }
+}
+
+unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
+    let vectorized_copy_size = size & !ALIGN_MASK;
+    if  vectorized_copy_size > 0 {
+        asm!(
+            r#"
+            2:
+                vmovups ymm0, [rsi]
+                vmovups [rdi], ymm0
+                add rsi, 32
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            "#,
+            inout("rsi") from                     => _,
+            inout("rdi") to                       => _,
+            inout("rcx") vectorized_copy_size * 4 => _,
+            out("ymm0") _,
+        );
+    }
+
+    let left_to_copy = size - vectorized_copy_size;
+    if  left_to_copy > 0 {
+        let start_index = vectorized_copy_size;
+        for index in 0..left_to_copy {
+            let index = start_index + index;
+            let value = *from.add(index);
+
+            *to.add(index) = value;
+        }
+    }
+}
+
+unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
+    let vectorized_set_size = size & !ALIGN_MASK;
+    if  vectorized_set_size > 0 {
+        let values = [value; ELEMENTS_PER_VECTOR];
+
+        asm!(
+            r#"
+                vmovups ymm0, [rsi]
+            2:
+                vmovups [rdi], ymm0
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            "#,
+            inout("rsi") values.as_ptr()         => _,
+            inout("rdi") target                  => _,
+            inout("rcx") vectorized_set_size * 4 => _,
+            out("ymm0") _,
+        );
+    }
+
+    let left_to_set = size - vectorized_set_size;
+    if  left_to_set > 0 {
+        let start_index = vectorized_set_size;
+        for index in 0..left_to_set {
+            let index = start_index + index;
+
+            *target.add(index) = value;
         }
     }
 }
