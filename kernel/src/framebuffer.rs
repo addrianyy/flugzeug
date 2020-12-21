@@ -99,8 +99,10 @@ impl Framebuffer {
         let clear_size = self.buffer.len();
 
         unsafe {
-            set_32(self.mmio.as_mut_ptr(),   color, clear_size);
-            set_32(self.buffer.as_mut_ptr(), color, clear_size);
+            dual_set_32(self.mmio.as_mut_ptr(),
+                        self.buffer.as_mut_ptr(),
+                        color,
+                        clear_size);
         }
     }
 
@@ -111,8 +113,10 @@ impl Framebuffer {
         let index = self.pixels_per_scanline * y + x;
 
         unsafe {
-            copy_32(colors.as_ptr(), self.mmio[index..].as_mut_ptr(),   colors.len());
-            copy_32(colors.as_ptr(), self.buffer[index..].as_mut_ptr(), colors.len());
+            dual_copy_32(colors.as_ptr(),
+                         self.mmio[index..].as_mut_ptr(),
+                         self.buffer[index..].as_mut_ptr(),
+                         colors.len());
         }
     }
 
@@ -169,6 +173,10 @@ impl Font {
         for oy in 0..self.height {
             let line_data  = char_data[oy];
             let mut colors = [0u32; 8];
+
+            if line_data == 0 {
+                continue;
+            }
 
             for ox in 0..self.width {
                 let set   = line_data & (1 << (7 - ox)) != 0;
@@ -283,8 +291,7 @@ impl TextFramebuffer {
                 let c_to_mmio   = self.framebuffer.mmio[to_index..].as_mut_ptr();
 
                 unsafe {
-                    copy_32(c_from, c_to_mmio, copy_size);
-                    copy_32(c_from, c_to,      copy_size);
+                    dual_copy_32(c_from, c_to_mmio, c_to, copy_size);
                 }
             }
         }
@@ -308,14 +315,12 @@ impl TextFramebuffer {
             let clear_size  = pixels_per_text_line;
             let clear_value = self.background;
 
+            let c_mmio   = self.framebuffer.mmio[clear_start..].as_mut_ptr();
+            let c_buffer = self.framebuffer.buffer[clear_start..].as_mut_ptr();
+
             // Clear the last line.
             unsafe {
-                let c_mmio   = self.framebuffer.mmio[clear_start..].as_mut_ptr();
-                let c_buffer = self.framebuffer.buffer[clear_start..].as_mut_ptr();
-
-                // Clear both MMIO and buffer.
-                set_32(c_mmio,   clear_value, clear_size);
-                set_32(c_buffer, clear_value, clear_size);
+                dual_set_32(c_mmio, c_buffer, clear_value, clear_size);
             }
 
             // Move cursor one line up.
@@ -436,7 +441,7 @@ pub fn get() -> &'static Lock<Option<TextFramebuffer>> {
 const ELEMENTS_PER_VECTOR: usize = 32 / 4;
 const ALIGN_MASK:          usize = ELEMENTS_PER_VECTOR - 1;
 
-unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
+unsafe fn dual_copy_32(from: *const u32, to1: *mut u32, to2: *mut u32, size: usize) {
     let vectorized_copy_size = size & !ALIGN_MASK;
     if  vectorized_copy_size > 0 {
         asm!(
@@ -444,13 +449,16 @@ unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
             2:
                 vmovdqu ymm0, [rsi]
                 vmovdqu [rdi], ymm0
+                vmovdqu [rbx], ymm0
                 add rsi, 32
                 add rdi, 32
+                add rbx, 32
                 sub rcx, 32
                 jnz 2b
             "#,
             inout("rsi") from                     => _,
-            inout("rdi") to                       => _,
+            inout("rdi") to1                      => _,
+            inout("rbx") to2                      => _,
             inout("rcx") vectorized_copy_size * 4 => _,
             out("ymm0") _,
         );
@@ -463,12 +471,13 @@ unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
             let index = start_index + index;
             let value = *from.add(index);
 
-            *to.add(index) = value;
+            *to1.add(index) = value;
+            *to2.add(index) = value;
         }
     }
 }
 
-unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
+unsafe fn dual_set_32(target1: *mut u32, target2: *mut u32, value: u32, size: usize) {
     let vectorized_set_size = size & !ALIGN_MASK;
     if  vectorized_set_size > 0 {
         let values = [value; ELEMENTS_PER_VECTOR];
@@ -478,12 +487,15 @@ unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
                 vmovdqu ymm0, [rsi]
             2:
                 vmovdqu [rdi], ymm0
+                vmovdqu [rbx], ymm0
                 add rdi, 32
+                add rbx, 32
                 sub rcx, 32
                 jnz 2b
             "#,
             inout("rsi") values.as_ptr()         => _,
-            inout("rdi") target                  => _,
+            inout("rdi") target1                 => _,
+            inout("rbx") target2                 => _,
             inout("rcx") vectorized_set_size * 4 => _,
             out("ymm0") _,
         );
@@ -495,7 +507,8 @@ unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
         for index in 0..left_to_set {
             let index = start_index + index;
 
-            *target.add(index) = value;
+            *target1.add(index) = value;
+            *target2.add(index) = value;
         }
     }
 }
