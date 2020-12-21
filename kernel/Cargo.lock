@@ -5,6 +5,10 @@ name = "acpi"
 version = "0.1.0"
 
 [[package]]
+name = "asmlink"
+version = "0.1.0"
+
+[[package]]
 name = "boot_block"
 version = "0.1.0"
 dependencies = [
@@ -23,6 +27,7 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "asmlink",
  "boot_block",
  "cpu",
  "lock",

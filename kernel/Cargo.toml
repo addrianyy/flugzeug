@@ -12,3 +12,6 @@ rangeset = { path = "../libs/rangeset" }
 acpi = { path = "../libs/acpi" }
 lock = { path = "../libs/lock" }
 cpu = { path = "../libs/cpu" }
+
+[build-dependencies]
+asmlink = { path = "../libs/asmlink" }
