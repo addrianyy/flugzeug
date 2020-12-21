@@ -8,61 +8,6 @@ pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 
 static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
 
-unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
-    if (size * 4) & 31 == 0 {
-        /*
-        asm!(
-            "rep movsq",
-            inout("rsi") from     => _,
-            inout("rdi") to       => _,
-            inout("rcx") size / 2 => _,
-        );
-        */
-        asm!(
-            r#"
-                2:
-                vmovdqu ymm0, [rsi]
-                vmovdqu [rdi], ymm0
-                add rsi, 32
-                add rdi, 32
-                sub rcx, 32
-                jnz 2b
-            "#,
-            inout("rsi") from     => _,
-            inout("rdi") to       => _,
-            inout("rcx") size * 4 => _,
-            out("ymm0") _,
-        );
-    } else {
-        asm!(
-            "rep movsd",
-            inout("rsi") from => _,
-            inout("rdi") to   => _,
-            inout("rcx") size => _,
-        );
-    }
-}
-
-unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
-    let value = (value as u64) << 32 | (value as u64);
-
-    if size & 1 == 0 {
-        asm!(
-            "rep stosq",
-            inout("rdi") target   => _,
-            inout("rcx") size / 2 => _,
-            inout("rax") value    => _,
-        );
-    } else {
-        asm!(
-            "rep stosd",
-            inout("rdi") target => _,
-            inout("rcx") size   => _,
-            inout("rax") value  => _,
-        );
-    }
-}
-
 enum ColorMode {
     RGB,
     BGR,
@@ -286,6 +231,65 @@ impl TextFramebuffer {
         text_fb
     }
 
+    fn scroll(&mut self) {
+        // Move every line one line up (except the first one).
+        // As there is overlap and source > destination we need to copy forwards.
+
+        let part_count = 8;
+        let part_size  = self.framebuffer.width / part_count;
+        let last_add   = self.framebuffer.width - (part_count * part_size);
+
+        // We move up every text line except the first one.
+        let graphics_lines_to_copy = (self.height - 1) * self.font.visual_height;
+
+        for line_index in 0..graphics_lines_to_copy {
+            // Copy from the next line to the current one.
+            let from_y = line_index + self.font.visual_height;
+            let to_y   = line_index;
+
+            // Calculate buffer indices from graphics Y position.
+            let from_index = from_y * self.framebuffer.pixels_per_scanline;
+            let to_index   = to_y   * self.framebuffer.pixels_per_scanline;
+
+            // Divide the line into parts and copy only parts where `from` is different than `to`.
+            for part_index in 0..part_count {
+                // Get the starting X position of this part.
+                let start_x = part_index * part_size;
+
+                let copy_size = if part_index + 1 == part_count {
+                    // If framebuffer width is not divisible by part count then last part
+                    // will have more elements than others.
+                    last_add
+                } else {
+                    0
+                } + part_size;
+
+                let from_index = from_index + start_x;
+                let to_index   = to_index   + start_x;
+
+                let equal = unsafe {
+                    compare_32(self.framebuffer.buffer[from_index..].as_ptr(),
+                               self.framebuffer.buffer[to_index..].as_ptr(),
+                               copy_size)
+                };
+
+                // If parts are equal we don't need to copy anything.
+                if equal {
+                    continue;
+                }
+
+                let c_from      = self.framebuffer.buffer[from_index..].as_ptr();
+                let c_to        = self.framebuffer.buffer[to_index..].as_mut_ptr();
+                let c_to_mmio   = self.framebuffer.mmio[to_index..].as_mut_ptr();
+
+                unsafe {
+                    copy_32(c_from, c_to_mmio, copy_size);
+                    copy_32(c_from, c_to,      copy_size);
+                }
+            }
+        }
+    }
+
     fn newline(&mut self) {
         // Go to the new line.
         self.x  = 0;
@@ -293,45 +297,25 @@ impl TextFramebuffer {
 
         if self.y >= self.height {
             // We are out of vertical space and we need to scroll.
+            self.scroll();
 
-            // Calculate number of pixels in one text line.
-            let pixels_per_line = self.font.visual_height * self.framebuffer.pixels_per_scanline;
-
-            let from_y = 1;
-            let to_y   = 0;
-
-            let from_start = from_y * pixels_per_line;
-            let to_start   = to_y   * pixels_per_line;
-            let copy_size  = (self.height - 1) * pixels_per_line;
-            
-            // Move every line one line up (except the first one).
-            // As there is overlap and source > destination we need to copy forwards.
-            unsafe {
-                let _from_ptr: *mut u32 = &mut self.framebuffer.mmio[from_start];
-                let to_ptr:    *mut u32 = &mut self.framebuffer.mmio[to_start];
-
-                let from_ptr_buffer: *mut u32 = &mut self.framebuffer.buffer[from_start];
-                let to_ptr_buffer:   *mut u32 = &mut self.framebuffer.buffer[to_start];
-
-                // Move lines up in both MMIO and buffer. For MMIO we use buffer as
-                // a source to avoid expensive MMIO read.
-                copy_32(from_ptr_buffer, to_ptr,        copy_size);
-                copy_32(from_ptr_buffer, to_ptr_buffer, copy_size);
-            }
+            // Calulate number of pixels per text line.
+            let pixels_per_text_line = self.font.visual_height *
+                self.framebuffer.pixels_per_scanline;
 
             let clear_y     = self.height - 1;
-            let clear_start = clear_y * pixels_per_line;
-            let clear_size  = pixels_per_line;
+            let clear_start = clear_y * pixels_per_text_line;
+            let clear_size  = pixels_per_text_line;
             let clear_value = self.background;
 
             // Clear the last line.
             unsafe {
-                let clear_ptr:        *mut u32 = &mut self.framebuffer.mmio[clear_start];
-                let clear_ptr_buffer: *mut u32 = &mut self.framebuffer.buffer[clear_start];
+                let c_mmio   = self.framebuffer.mmio[clear_start..].as_mut_ptr();
+                let c_buffer = self.framebuffer.buffer[clear_start..].as_mut_ptr();
 
                 // Clear both MMIO and buffer.
-                set_32(clear_ptr,        clear_value, clear_size);
-                set_32(clear_ptr_buffer, clear_value, clear_size);
+                set_32(c_mmio,   clear_value, clear_size);
+                set_32(c_buffer, clear_value, clear_size);
             }
 
             // Move cursor one line up.
@@ -447,4 +431,122 @@ pub unsafe fn initialize() {
 
 pub fn get() -> &'static Lock<Option<TextFramebuffer>> {
     &FRAMEBUFFER
+}
+
+const ELEMENTS_PER_VECTOR: usize = 32 / 4;
+const ALIGN_MASK:          usize = ELEMENTS_PER_VECTOR - 1;
+
+unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
+    let vectorized_copy_size = size & !ALIGN_MASK;
+    if  vectorized_copy_size > 0 {
+        asm!(
+            r#"
+            2:
+                vmovdqu ymm0, [rsi]
+                vmovdqu [rdi], ymm0
+                add rsi, 32
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            "#,
+            inout("rsi") from                     => _,
+            inout("rdi") to                       => _,
+            inout("rcx") vectorized_copy_size * 4 => _,
+            out("ymm0") _,
+        );
+    }
+
+    let left_to_copy = size - vectorized_copy_size;
+    if  left_to_copy > 0 {
+        let start_index = vectorized_copy_size;
+        for index in 0..left_to_copy {
+            let index = start_index + index;
+            let value = *from.add(index);
+
+            *to.add(index) = value;
+        }
+    }
+}
+
+unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
+    let vectorized_set_size = size & !ALIGN_MASK;
+    if  vectorized_set_size > 0 {
+        let values = [value; ELEMENTS_PER_VECTOR];
+
+        asm!(
+            r#"
+                vmovdqu ymm0, [rsi]
+            2:
+                vmovdqu [rdi], ymm0
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            "#,
+            inout("rsi") values.as_ptr()         => _,
+            inout("rdi") target                  => _,
+            inout("rcx") vectorized_set_size * 4 => _,
+            out("ymm0") _,
+        );
+    }
+
+    let left_to_set = size - vectorized_set_size;
+    if  left_to_set > 0 {
+        let start_index = vectorized_set_size;
+        for index in 0..left_to_set {
+            let index = start_index + index;
+
+            *target.add(index) = value;
+        }
+    }
+}
+
+unsafe fn compare_32(a: *const u32, b: *const u32, size: usize) -> bool {
+    let vectorized_cmp_size = size & !ALIGN_MASK;
+    if  vectorized_cmp_size > 0 {
+        let result: u32;
+
+        asm!(
+            r#"
+            2:
+                vmovdqu   ymm0, [rsi]
+                vpcmpeqd  ymm0, ymm0, [rdi]
+                vpmovmskb eax, ymm0
+
+                cmp eax, -1
+                jne 1f
+
+                add rsi, 32
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            1:
+            "#,
+            inout("rsi") a                       => _,
+            inout("rdi") b                       => _,
+            inout("rcx") vectorized_cmp_size * 4 => _,
+            out("eax")   result,
+            out("ymm0") _,
+        );
+
+        if result != 0xffff_ffff {
+            return false;
+        }
+    }
+
+    let left_to_cmp = size - vectorized_cmp_size;
+    if  left_to_cmp > 0 {
+        let start_index = vectorized_cmp_size;
+        for index in 0..left_to_cmp {
+            let index = start_index + index;
+
+            let a = *a.add(index);
+            let b = *b.add(index);
+
+            if a != b {
+                return false;
+            }
+        }
+    }
+
+    true
 }

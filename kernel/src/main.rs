@@ -77,7 +77,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         for i in 0.. {
             let tsc = time::get_tsc();
 
-            color_println!(0xff00ff, "running {} ({}K)......", i, diff / 1000);
+            color_println!(0xff00ff, "running {} ({}K)", i, diff / 1000);
 
             diff = time::get_tsc() - tsc;
         }
