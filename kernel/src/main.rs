@@ -67,17 +67,15 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");
 
-        /*
         let mut diff = 0;
 
         for i in 0.. {
-            let tsc = rdtsc();
+            let tsc = time::get_tsc();
 
             color_println!(0xff00ff, "running {} ({}K)......", i, diff / 1000);
 
-            diff = rdtsc() - tsc;
+            diff = time::get_tsc() - tsc;
         }
-        */
     }
 
     cpu::halt();
