@@ -31,6 +31,7 @@ unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
             inout("rsi") from     => _,
             inout("rdi") to       => _,
             inout("rcx") size * 4 => _,
+            out("ymm0") _,
         );
     } else {
         asm!(
