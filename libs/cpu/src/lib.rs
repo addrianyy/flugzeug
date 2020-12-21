@@ -11,12 +11,40 @@ pub struct Cpuid {
     pub edx: u32,
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Debug)]
 pub struct CpuFeatures {
+    pub fpu: bool,
+    pub vme: bool,
+    pub de:  bool,
+    pub pse: bool,
+    pub tsc: bool,
+    pub mmx: bool,
+    pub fxsr: bool,
+    pub sse: bool,
+    pub sse2: bool,
+    pub htt: bool,
+    pub sse3: bool,
+    pub ssse3: bool,
+    pub sse4_1: bool,
+    pub sse4_2: bool,
+    pub x2apic: bool,
+    pub aesni: bool,
+    pub xsave: bool,
+    pub avx: bool,
+    pub avx2: bool,
+    pub fma: bool,
+    pub apic: bool,
+    pub vmx: bool,
+    pub lahf: bool,
+    pub lzcnt: bool,
+    pub prefetchw: bool,
+    pub syscall: bool,
+    pub xd: bool,
+    pub rdtscp: bool,
+    pub bits64: bool,
+    pub avx512f: bool,
     pub page2m: bool,
     pub page1g: bool,
-    pub apic:   bool,
-    pub x2apic: bool,
 }
 
 pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
@@ -38,17 +66,52 @@ pub fn get_features() -> CpuFeatures {
     let max_extended_cpuid = cpuid(0x80000000, 0).eax;
 
     if max_cpuid >= 1 {
-        let cpuid = cpuid(1, 0);
+        let cpuid   = cpuid(1, 0);
 
-        features.page2m = (cpuid.edx >>  3) & 1 != 0;
-        features.apic   = (cpuid.edx >>  9) & 1 != 0;
-        features.x2apic = (cpuid.ecx >> 21) & 1 != 0;
+        features.fpu    = ((cpuid.edx >>  0) & 1) == 1;
+        features.vme    = ((cpuid.edx >>  1) & 1) == 1;
+        features.de     = ((cpuid.edx >>  2) & 1) == 1;
+        features.pse    = ((cpuid.edx >>  3) & 1) == 1;
+        features.page2m = ((cpuid.edx >>  3) & 1) == 1;
+        features.tsc    = ((cpuid.edx >>  4) & 1) == 1;
+        features.apic   = ((cpuid.edx >>  9) & 1) == 1;
+        features.mmx    = ((cpuid.edx >> 23) & 1) == 1;
+        features.fxsr   = ((cpuid.edx >> 24) & 1) == 1;
+        features.sse    = ((cpuid.edx >> 25) & 1) == 1;
+        features.sse2   = ((cpuid.edx >> 26) & 1) == 1;
+        features.htt    = ((cpuid.edx >> 28) & 1) == 1;
+
+        features.sse3    = ((cpuid.ecx >>  0) & 1) == 1;
+        features.vmx     = ((cpuid.ecx >>  5) & 1) == 1;
+        features.ssse3   = ((cpuid.ecx >>  9) & 1) == 1;
+        features.fma     = ((cpuid.ecx >> 12) & 1) == 1;
+        features.sse4_1  = ((cpuid.ecx >> 19) & 1) == 1;
+        features.sse4_2  = ((cpuid.ecx >> 20) & 1) == 1;
+        features.x2apic  = ((cpuid.ecx >> 21) & 1) == 1;
+        features.aesni   = ((cpuid.ecx >> 25) & 1) == 1;
+        features.xsave   = ((cpuid.ecx >> 26) & 1) == 1;
+        features.avx     = ((cpuid.ecx >> 28) & 1) == 1;
+    }
+
+    if max_cpuid >= 7 {
+        let cpuid = cpuid(7, 0);
+
+        features.avx2    = ((cpuid.ebx >>  5) & 1) == 1;
+        features.avx512f = ((cpuid.ebx >> 16) & 1) == 1;
     }
 
     if max_extended_cpuid >= 0x80000001 {
         let cpuid = cpuid(0x80000001, 0);
 
-        features.page1g = (cpuid.edx >> 26) & 1 != 0;
+        features.lahf      = ((cpuid.ecx >> 0) & 1) == 1;
+        features.lzcnt     = ((cpuid.ecx >> 5) & 1) == 1;
+        features.prefetchw = ((cpuid.ecx >> 8) & 1) == 1;
+
+        features.syscall     = ((cpuid.edx >> 11) & 1) == 1;
+        features.xd          = ((cpuid.edx >> 20) & 1) == 1;
+        features.page1g      = ((cpuid.edx >> 26) & 1) == 1;
+        features.rdtscp      = ((cpuid.edx >> 27) & 1) == 1;
+        features.bits64      = ((cpuid.edx >> 29) & 1) == 1;
     }
 
     features

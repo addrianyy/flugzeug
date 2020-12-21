@@ -427,6 +427,9 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
     // were already initialized by other CPU.
     unsafe {
         serial::initialize();
+
+        bootlib::verify_cpu();
+
         mm::initialize();
 
         // Find ACPI tables on the system if they weren't found before.

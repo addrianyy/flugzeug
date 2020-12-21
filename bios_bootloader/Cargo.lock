@@ -20,6 +20,7 @@ dependencies = [
  "asmlink",
  "bdd",
  "boot_block",
+ "bootlib",
  "cpu",
  "elfparse",
  "libc_routines",
@@ -37,6 +38,13 @@ dependencies = [
  "page_table",
  "rangeset",
  "serial_port",
+]
+
+[[package]]
+name = "bootlib"
+version = "0.1.0"
+dependencies = [
+ "cpu",
 ]
 
 [[package]]

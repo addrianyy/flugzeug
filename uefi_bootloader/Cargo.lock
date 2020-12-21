@@ -19,6 +19,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootlib"
+version = "0.1.0"
+dependencies = [
+ "cpu",
+]
+
+[[package]]
 name = "cpu"
 version = "0.1.0"
 
@@ -59,6 +66,7 @@ dependencies = [
  "acpi",
  "asmlink",
  "boot_block",
+ "bootlib",
  "cpu",
  "elfparse",
  "libc_routines",

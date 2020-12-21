@@ -11,6 +11,7 @@ boot_block = { path = "../libs/boot_block" }
 page_table = { path = "../libs/page_table" }
 elfparse = { path = "../libs/elfparse" }
 rangeset = { path = "../libs/rangeset" }
+bootlib = { path = "../libs/bootlib" }
 lock = { path = "../libs/lock" }
 acpi = { path = "../libs/acpi" }
 cpu = { path = "../libs/cpu" }

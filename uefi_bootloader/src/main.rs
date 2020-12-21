@@ -29,6 +29,7 @@ use boot_block::BootBlock;
 static BOOT_BLOCK:  BootBlock  = BootBlock::new();
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+
 #[no_mangle]
 extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) -> ! {
     if !INITIALIZED.load(Ordering::Relaxed) {
@@ -52,6 +53,8 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
         assert!(image_handle == 0 && system_table == core::ptr::null_mut(),
                 "Invalid arguments passed to the bootloader.");
     }
+
+    bootlib::verify_cpu();
 
     // No allocations should be done here to ensure that we will have enough low memory
     // to create AP entrypoint.
