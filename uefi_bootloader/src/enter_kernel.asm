@@ -140,13 +140,20 @@ enter_kernel:
     or  eax,  (1 << 31) ; Paging enable
     mov cr0, rax
 
-    ; Enable x87, SSE and AVX.
+    ; Enable x87, SSE and AVX in XCR0.
     xor rax, rax
-    xor rcx, rcx
+    xor rdx, rdx
     or  rax, (1 << 0) ; x87
     or  rax, (1 << 1) ; SSE
     or  rax, (1 << 2) ; AVX
+    xor rcx, rcx
     xsetbv
+
+    ; Clear IA32_XSS because we only use XCR0.
+    mov ecx, 0xda0
+    xor eax, eax
+    xor edx, edx
+    wrmsr
 
     ; We are currently executing code in identity map. Because kernel provides only
     ; linear map, we need to switch to it. It's as simple as adding `Physical region base`

@@ -73,6 +73,40 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");
 
+        // We start with legacy area size and XSAVE header size.
+        let mut xsave_size = 512 + 64;
+
+        // IA32_XSS is not used.
+        let xcr0 = cpu::get_xcr0();
+
+        for component in 2..64 {
+            if xcr0 & (1 << component) != 0 {
+                let cpuid  = cpu::cpuid(0x0d, component);
+                let offset = cpuid.ebx;
+                let size   = cpuid.eax;
+
+                xsave_size = xsave_size.max(offset + size);
+            }
+        }
+
+        let mut data = [3u8; 32];
+        unsafe {
+            asm!("vmovdqu ymm1, [rax]", in("rax") data.as_ptr());
+        }
+
+        unsafe {
+            asm!("int3");
+        }
+
+        let mut data = [0u8; 32];
+        unsafe {
+            asm!("vmovdqu [rax], ymm1", in("rax") data.as_mut_ptr());
+        }
+
+        println!("{:?}", data);
+
+
+        /*
         let mut diff = 0;
 
         for i in 0.. {
@@ -82,6 +116,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
 
             diff = rdtsc() - tsc;
         }
+        */
     }
 
     cpu::halt();

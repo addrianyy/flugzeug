@@ -41,13 +41,20 @@ enter_kernel:
     or  eax,  (1 << 31) ; Paging enable
     mov cr0, eax
 
-    ; Enable x87, SSE and AVX.
+    ; Enable x87, SSE and AVX in XCR0.
     xor eax, eax
-    xor ecx, ecx
+    xor edx, edx
     or  eax, (1 << 0) ; x87
     or  eax, (1 << 1) ; SSE
     or  eax, (1 << 2) ; AVX
+    xor ecx, ecx
     xsetbv
+
+    ; Clear IA32_XSS because we only use XCR0.
+    mov ecx, 0xda0
+    xor eax, eax
+    xor edx, edx
+    wrmsr
 
     ; Switch CPU to long mode.
     jmp 0x08:.entry_64

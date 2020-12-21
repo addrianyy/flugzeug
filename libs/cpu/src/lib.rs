@@ -5,10 +5,10 @@
 
 #[derive(Default, Copy, Clone)]
 pub struct Cpuid {
-    eax: u32,
-    ebx: u32,
-    ecx: u32,
-    edx: u32,
+    pub eax: u32,
+    pub ebx: u32,
+    pub ecx: u32,
+    pub edx: u32,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -120,4 +120,23 @@ pub fn pause() {
     unsafe {
         asm!("pause");
     }
+}
+
+pub fn get_xcr0() -> u64 {
+    let low:  u32;
+    let high: u32;
+
+    unsafe {
+        asm!(
+            r#"
+                xor eax, eax
+                xor edx, edx
+                xor ecx, ecx
+                xgetbv
+            "#,
+            out("edx") high, out("eax") low, out("ecx") _,
+        );
+    }
+
+    low as u64 | (high as u64) << 32
 }

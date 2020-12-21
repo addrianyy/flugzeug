@@ -1,5 +1,6 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use core::alloc::Layout;
+use core::alloc::GlobalAlloc;
 
 use crate::interrupts::Interrupts;
 use crate::mm::{self, FreeList};
@@ -29,7 +30,14 @@ pub fn get_core_locals() -> &'static CoreLocals {
 #[repr(C)]
 pub struct CoreLocals {
     /// Must be always the first field in the structure.
+    /// Required offset: 0.
+    /// DON'T CHANGE!
     self_address: usize,
+
+    /// Must be always the second field in the structure.
+    /// Required offset: 8.
+    /// DON'T CHANGE!
+    xsave_area: usize,
 
     /// Unique identifier for this CPU. 0 is BSP.
     pub id: u64,
@@ -122,6 +130,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
 
     let core_locals = CoreLocals {
         self_address: core_locals_ptr,
+        xsave_area:   0,
         id:           core_id,
         apic:         Lock::new(None),
         apic_id:      AtomicU32::new(!0),
@@ -195,4 +204,42 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
     core::ptr::write(core_locals_ptr as *mut CoreLocals, core_locals);
 
     cpu::wrmsr(IA32_GS_BASE, core_locals_ptr as u64);
+
+    initialize_xsave();
+}
+
+unsafe fn initialize_xsave() {
+    // We start with legacy area size and XSAVE header size.
+    let mut xsave_size = 512 + 64;
+
+    // IA32_XSS is not used.
+    let xcr0 = cpu::get_xcr0();
+
+    for component in 2..64 {
+        if xcr0 & (1 << component) != 0 {
+            let cpuid  = cpu::cpuid(0x0d, component);
+            let offset = cpuid.ebx;
+            let size   = cpuid.eax;
+
+            xsave_size = xsave_size.max(offset + size);
+        }
+    }
+
+    // Allocate the XSAVE area.
+    let xsave_size   = xsave_size as usize;
+    let xsave_layout = Layout::from_size_align(xsave_size, 64)
+        .expect("Failed to create XSAVE layout.");
+    let xsave_area   = mm::GLOBAL_ALLOCATOR.alloc(xsave_layout);
+
+    assert!(xsave_area != core::ptr::null_mut(), "Failed to allocate XSAVE area.");
+
+    // Zero out XSAVE area as required by the architecture.
+    core::ptr::write_bytes(xsave_area, 0, xsave_size);
+
+    // Manually get core locals so we get a mutable reference.
+    let core_locals: usize;
+    asm!("mov {}, gs:[0]", out(reg) core_locals);
+
+    // Save address of XSAVE area.
+    (*(core_locals as *mut CoreLocals)).xsave_area = xsave_area as usize;
 }

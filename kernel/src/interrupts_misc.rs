@@ -22,6 +22,22 @@ global_asm!(r#"
         push r14
         push qword ptr [r15 + 0x18] // R15
 
+        push rax
+        push rcx
+        push rdx
+
+        // Get XCR0.
+        xor rcx, rcx
+        xgetbv
+
+        // Save processor state.
+        mov rcx, gs:[8]
+        xsave [rcx]
+        
+        pop rdx
+        pop rcx
+        pop rax
+        
         // Save the current stack pointer for the 4th argument (register state).
         mov rcx, rsp
 
@@ -36,6 +52,22 @@ global_asm!(r#"
 
         // Restore the stack pointer.
         mov rsp, rbp
+
+        push rax
+        push rcx
+        push rdx
+
+        // Get XCR0.
+        xor rcx, rcx
+        xgetbv
+
+        // Restore processor state.
+        mov rcx, gs:[8]
+        xrstor [rcx]
+        
+        pop rdx
+        pop rcx
+        pop rax
 
         // Restore the register state.
         pop  qword ptr [r15 + 0x18] // R15
