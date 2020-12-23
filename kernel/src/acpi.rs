@@ -1,5 +1,6 @@
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use alloc::collections::btree_set::BTreeSet;
+use alloc::vec::Vec;
 
 use page_table::PhysAddr;
 use acpi::Header;
@@ -85,148 +86,54 @@ pub unsafe fn notify_core_online() {
     }
 }
 
-unsafe fn parse_header(phys_addr: PhysAddr) -> (Header, PhysAddr, usize) {
-    let header: Header = mm::read_phys_unaligned(phys_addr);
-
-    // Get the table address.
-    let payload_addr = PhysAddr(phys_addr.0 + core::mem::size_of::<Header>() as u64);
-
-    // Get the table size.
-    let payload_size = header.length.checked_sub(core::mem::size_of::<Header>() as u32)
-        .expect("ACPI payload size has undeflowed.");
-
-    // Calculate table checkum.
-    let checksum = (phys_addr.0..phys_addr.0 + header.length as u64)
-        .fold(0u8, |acc, phys_addr| {
-            acc.wrapping_add(mm::read_phys(PhysAddr(phys_addr)))
-        });
-
-    // Make sure that the table checkum is valid..
-    assert!(checksum == 0, "{:?} table checksum is invalid.",
-            core::str::from_utf8(&header.signature));
-
-    (header, payload_addr, payload_size as usize)
-}
-
-unsafe fn parse_madt(phys_addr: PhysAddr) -> BTreeSet<u32> {
-    const APIC_ENABLED:        u32 = 1 << 0;
-    const APIC_ONLINE_CAPABLE: u32 = 1 << 1;
-
-    let (_header, payload, payload_size) = parse_header(phys_addr);
-
-    // Get the address of Interrupt Controller Structure. We need to skip
-    // local interrupt controller address (4 bytes) and flags (4 bytes).
-    let mut ics = PhysAddr(payload.0 + 4 + 4);
-    let end     = payload.0 + payload_size as u64;
-
-    let mut apics = BTreeSet::new();
-
-    // Go through every ICS in the MADT.
-    loop {
-        // Make sure that there is enough space for ICS type and size.
-        if ics.0 + 2 > end {
-            break;
-        }
-
-        let ics_type: u8 = mm::read_phys(PhysAddr(ics.0 + 0));
-        let ics_size: u8 = mm::read_phys(PhysAddr(ics.0 + 1));
-
-        // Make sure that the ICS size is valid.
-        assert!(ics_size >= 2, "ICS size is invalid.");
-
-        // Make sure that there is enough space for the whole ICS entry.
-        if ics.0 + ics_size as u64 > end {
-            break;
-        }
-
-        // Try to extract APIC information from the ICS.
-        let apic = match ics_type {
-            0 => {
-                // Processor Local APIC
-
-                // Make sure that the size that we expect is correct.
-                assert!(ics_size == 8, "Invalid Local APIC entry size.");
-
-                let apic_id: u8  = mm::read_phys_unaligned(PhysAddr(ics.0 + 3));
-                let flags:   u32 = mm::read_phys_unaligned(PhysAddr(ics.0 + 4));
-
-                Some((apic_id as u32, flags))
-            }
-            9 => {
-                // Processor Local x2APIC
-
-                // Make sure that the size that we expect is correct.
-                assert!(ics_size == 16, "Invalid Local x2APIC entry size.");
-
-                let apic_id: u32 = mm::read_phys_unaligned(PhysAddr(ics.0 + 4));
-                let flags:   u32 = mm::read_phys_unaligned(PhysAddr(ics.0 + 8));
-
-                Some((apic_id, flags))
-            }
-            _ => None,
-        };
-
-        if let Some((apic_id, flags)) = apic {
-            // We only care about APICs which are either enabled or can be enabled by us.
-            if flags & APIC_ENABLED != 0 || flags & APIC_ONLINE_CAPABLE != 0 {
-                // Make sure that this APIC reported by ICS is unique.
-                assert!(apics.insert(apic_id), "Multiple ICSes reported the same APIC ID.");
-            }
-        }
-
-        // Go to the next ICS entry.
-        ics = PhysAddr(ics.0 + ics_size as u64);
-    }
-
-    apics
-}
-
 pub unsafe fn initialize() {
     // Make sure that the ACPI hasn't been initialized yet.
     assert!(TOTAL_CORES.load(Ordering::SeqCst) == 0, "ACPI was already initialized.");
 
-    let tables = core!().boot_block.acpi_tables.lock().clone();
-    let rsdt   = tables.rsdt.expect("Bootloader didn't provide ACPI RSDT table address.");
+    let tables = {
+        // Get the addreses of ACPI system tables.
+        let system_tables = core!().boot_block.acpi_tables.lock().clone();
 
-    // Get the RSDT table data from the RSDP.
-    let (rsdt, rsdt_payload, rsdt_size) = parse_header(PhysAddr(rsdt));
+        // Get the preferred ACPI system table.
+        let (sdt_addr, sdt_type) = match (system_tables.rsdt, system_tables.xsdt) {
+            // XSDT takes priority.
+            (_, Some(xsdt)) => (xsdt, SdtType::Xsdt),
 
-    // Make sure that the RSDT signature matches.
-    assert!(&rsdt.signature == b"RSDT", "RSDT signature is invalid.");
+            // If there is no XSDT then fallback to RSDT.
+            (Some(rsdt), _) => (rsdt, SdtType::Rsdt),
 
-    // Make sure that the RSDT size is valid.
-    assert!(rsdt_size % core::mem::size_of::<u32>() == 0, "RSDT size is not divisible by 4.");
+            _ => panic!("Bootloader didn't provide address of any ACPI system table."),
+        };
 
-    let rsdt_entries = (rsdt_size as usize) / core::mem::size_of::<u32>();
+        println!("Using {:?} system table at address 0x{:x}.", sdt_type, sdt_addr);
+
+        // Get all subtables in the system table.
+        parse_system_table(PhysAddr(sdt_addr), sdt_type)
+    };
 
     let mut apics = None;
 
-    // Go through each table in the RSDT.
-    for entry in 0..rsdt_entries {
-        // Get the physical address of current RSDT entry.
-        let entry_addr = rsdt_payload.0 as usize + entry * core::mem::size_of::<u32>();
-        let entry_addr = PhysAddr(entry_addr as u64);
+    for (header, payload, payload_size) in tables {
+        if &header.signature == b"APIC" {
+            apics = Some(parse_madt(payload, payload_size));
+        }
 
-        // Get the address of the table.
-        let table_addr = PhysAddr(mm::read_phys_unaligned::<u32>(entry_addr) as u64);
-
-        // Get the signature of current table.
-        let signature: [u8; 4] = mm::read_phys(table_addr);
-
-        if &signature == b"APIC" {
-            // We have found MADT - Multiple APIC Description Table.
-            // Make sure that there is only one APIC table in whole RSDP.
-            assert!(apics.is_none(), "Multiple APIC tables were found in RSDP.");
-
-            // Parse the table to get all APICs on the system.
-            apics = Some(parse_madt(table_addr));
+        if true {
+            if let Ok(signature) = core::str::from_utf8(&header.signature) {
+                println!("  {}: 0x{:x}", signature, payload.0);
+            }
         }
     }
 
     let current_apic_id            = core!().apic_id().unwrap();
     let ap_entrypoint: Option<u64> = core!().boot_block.ap_entrypoint.lock().clone();
 
-    if ap_entrypoint.is_none() {
+    if let Some(ap_entrypoint) = ap_entrypoint {
+        if let Some(apics) = &apics {
+            println!("Launching {} APs. Bootloader AP entrypoint: 0x{:x}.",
+                     apics.len() - 1, ap_entrypoint);
+        }
+    } else {
         println!("WARNING: Bootloader hasn't provivided realmode AP \
                  entrypoint so APs won't be laucnhed.");
 
@@ -300,4 +207,165 @@ pub unsafe fn initialize() {
             core::sync::atomic::spin_loop_hint();
         }
     }
+}
+
+#[derive(Debug)]
+enum SdtType {
+    Rsdt,
+    Xsdt,
+}
+
+unsafe fn parse_header(phys_addr: PhysAddr) -> (Header, Option<(PhysAddr, usize)>) {
+    let header: Header = mm::read_phys_unaligned(phys_addr);
+
+    // Get the table address.
+    let payload_addr = PhysAddr(phys_addr.0 + core::mem::size_of::<Header>() as u64);
+
+    // Get the table size.
+    let payload_size = header.length.checked_sub(core::mem::size_of::<Header>() as u32)
+        .expect("ACPI payload size has underflowed.");
+
+    // Calculate table checkum.
+    let checksum = (phys_addr.0..phys_addr.0 + header.length as u64)
+        .fold(0u8, |acc, phys_addr| {
+            acc.wrapping_add(mm::read_phys(PhysAddr(phys_addr)))
+        });
+
+    // Get the payload only if the checksum is valid.
+    let payload = if checksum == 0 {
+        Some((payload_addr, payload_size as usize))
+    } else {
+        None
+    };
+
+    (header, payload)
+}
+
+unsafe fn parse_system_table(system_table: PhysAddr, sdt_type: SdtType)
+    -> Vec<(Header, PhysAddr, usize)>
+{
+    let (sdt, payload) = parse_header(system_table);
+    let (sdt_payload, sdt_size) = payload
+        .unwrap_or_else(|| panic!("{:?} checksum is invalid.", sdt_type));
+
+    // Make sure that the signature matches and get entry size.
+    let entry_size = match sdt_type {
+        SdtType::Rsdt => {
+            assert!(&sdt.signature == b"RSDT", "RSDT signature is invalid.");
+
+            // RSDT pointers are 32 bit wide.
+            core::mem::size_of::<u32>()
+        }
+        SdtType::Xsdt => {
+            assert!(&sdt.signature == b"XSDT", "XSDT signature is invalid.");
+
+            // XSDT pointers are 64 bit wide.
+            core::mem::size_of::<u64>()
+        }
+    };
+
+    let sdt_size    = sdt_size as usize;
+    let entry_count = sdt_size / entry_size;
+
+    // Make sure that the SDT size is valid.
+    assert!(sdt_size % entry_size == 0, "{:?} size is not divisible by entry size.", sdt_type);
+
+    let mut tables = Vec::with_capacity(entry_count);
+
+    // Go through each table in the SDT.
+    for entry in 0..entry_count {
+        let table_addr = PhysAddr({
+            // Get the physical address of current SDT entry.
+            let entry_addr = sdt_payload.0 as usize + entry * entry_size;
+            let entry_addr = PhysAddr(entry_addr as u64);
+
+            // Read the address of the table.
+            match sdt_type {
+                SdtType::Rsdt => mm::read_phys_unaligned::<u32>(entry_addr) as u64,
+                SdtType::Xsdt => mm::read_phys_unaligned::<u64>(entry_addr),
+            }
+        });
+
+        let (header, payload) = parse_header(table_addr);
+
+        if let Some((payload, payload_size)) = payload {
+            tables.push((header, payload, payload_size));
+        } else {
+            println!("Signature verification of ACPI table {:?} failed.",
+                     core::str::from_utf8(&header.signature));
+        }
+    }
+
+    tables
+}
+
+unsafe fn parse_madt(payload: PhysAddr, payload_size: usize) -> BTreeSet<u32> {
+    const APIC_ENABLED:        u32 = 1 << 0;
+    const APIC_ONLINE_CAPABLE: u32 = 1 << 1;
+
+    // Get the address of Interrupt Controller Structure. We need to skip
+    // local interrupt controller address (4 bytes) and flags (4 bytes).
+    let mut ics = PhysAddr(payload.0 + 4 + 4);
+    let end     = payload.0 + payload_size as u64;
+
+    let mut apics = BTreeSet::new();
+
+    // Go through every ICS in the MADT.
+    loop {
+        // Make sure that there is enough space for ICS type and size.
+        if ics.0 + 2 > end {
+            break;
+        }
+
+        let ics_type: u8 = mm::read_phys(PhysAddr(ics.0 + 0));
+        let ics_size: u8 = mm::read_phys(PhysAddr(ics.0 + 1));
+
+        // Make sure that the ICS size is valid.
+        assert!(ics_size >= 2, "ICS size is invalid.");
+
+        // Make sure that there is enough space for the whole ICS entry.
+        if ics.0 + ics_size as u64 > end {
+            break;
+        }
+
+        // Try to extract APIC information from the ICS.
+        let apic = match ics_type {
+            0 => {
+                // Processor Local APIC
+
+                // Make sure that the size that we expect is correct.
+                assert!(ics_size == 8, "Invalid Local APIC entry size.");
+
+                let apic_id: u8  = mm::read_phys_unaligned(PhysAddr(ics.0 + 3));
+                let flags:   u32 = mm::read_phys_unaligned(PhysAddr(ics.0 + 4));
+
+                Some((apic_id as u32, flags))
+            }
+            9 => {
+                // Processor Local x2APIC
+
+                // Make sure that the size that we expect is correct.
+                assert!(ics_size == 16, "Invalid Local x2APIC entry size.");
+
+                let apic_id: u32 = mm::read_phys_unaligned(PhysAddr(ics.0 + 4));
+                let flags:   u32 = mm::read_phys_unaligned(PhysAddr(ics.0 + 8));
+
+                Some((apic_id, flags))
+            }
+            _ => None,
+        };
+
+        if let Some((apic_id, flags)) = apic {
+            // We only care about APICs which are either enabled or can be enabled by us.
+            if flags & APIC_ENABLED != 0 || flags & APIC_ONLINE_CAPABLE != 0 {
+                // Make sure that this APIC reported by ICS is unique.
+                assert!(apics.insert(apic_id), "Multiple ICSes reported the same APIC ID.");
+            }
+        }
+
+        // Go to the next ICS entry.
+        ics = PhysAddr(ics.0 + ics_size as u64);
+    }
+
+    apics
 }

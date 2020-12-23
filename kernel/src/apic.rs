@@ -4,6 +4,12 @@ use crate::mm;
 const IA32_APIC_BASE: u32 = 0x1b;
 const APIC_BASE:      u64 = 0xfee0_0000;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ApicMode {
+    XApic,
+    X2Apic,
+}
+
 pub enum Apic {
     XApic(&'static mut [u32]),
     X2Apic,
@@ -48,6 +54,13 @@ impl Apic {
                 // X2Apic has a single, 64 bit ICR register.
                 cpu::wrmsr(0x830, value);
             }
+        }
+    }
+
+    pub fn mode(&self) -> ApicMode {
+        match self {
+            Apic::XApic(..) => ApicMode::XApic,
+            Apic::X2Apic    => ApicMode::X2Apic,
         }
     }
 

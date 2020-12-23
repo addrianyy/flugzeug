@@ -20,30 +20,26 @@ use page_table::PhysAddr;
 
 #[no_mangle]
 extern "C" fn _start(boot_block: PhysAddr) -> ! {
-    // Zero out the IDT so if there is any exception we will triple fault.
-    unsafe {
-        cpu::zero_idt();
-    }
-
     // Make sure that LLVM data layout isn't broken.
     assert!(core::mem::size_of::<u64>() == 8 && core::mem::align_of::<u64>() == 8,
             "U64 has invalid size/alignment.");
 
     unsafe {
+        // Zero out the IDT so if there is any exception we will triple fault.
+        cpu::zero_idt();
+
         // Initialize crucial kernel per-core components.
         core_locals::initialize(boot_block);
 
-        let main_core = core!().id == 0;
-
-        // Initialize framebuffer early so we can show logs on the screen.
-        if main_core {
+        if core!().id == 0 {
+            // Initialize framebuffer early so we can show logs on the screen.
             framebuffer::initialize();
         }
 
         interrupts::initialize();
         apic::initialize();
 
-        if main_core {
+        if core!().id == 0 {
             // Launch APs.
             acpi::initialize();
         }
@@ -51,7 +47,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         // Notify that this core is online and wait for other cores.
         acpi::notify_core_online();
 
-        if main_core {
+        if core!().id == 0 {
             // All cores are now launched and we have finished boot process.
             // Allow memory manager to clean up some things.
             mm::on_finished_boot_process();
@@ -66,12 +62,19 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         asm!("mov ax, ds", out("ax") ds);
     }
 
+    let apic_mode = core!().apic.lock()
+        .as_ref()
+        .unwrap()
+        .mode();
+
     color_println!(0x00ffff, "Core is now initialized. Core ID: {}. APIC ID {:?}. \
-                   CS 0x{:x}, DS 0x{:x}.", core!().id, core!().apic_id(), cs, ds);
+                   CS 0x{:x}, DS 0x{:x}. Using {:?}.", core!().id, core!().apic_id(),
+                   cs, ds, apic_mode);
 
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");
 
+        /*
         let mut diff = 0;
 
         for i in 0.. {
@@ -81,6 +84,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
 
             diff = time::get_tsc() - tsc;
         }
+        */
     }
 
     cpu::halt();

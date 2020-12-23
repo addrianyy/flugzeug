@@ -392,8 +392,8 @@ pub unsafe fn initialize() {
 
         drop(kernel_framebuffer);
 
-        println!("Initialized framebuffer device with {}x{} resolution.",
-                 framebuffer_info.width, framebuffer_info.height);
+        println!("Initialized framebuffer device with {}x{} resolution. (video buffer 0x{:x})",
+                 framebuffer_info.width, framebuffer_info.height, framebuffer_info.fb_base);
 
         if true {
             if let Some(supported_modes) = core!().boot_block.supported_modes.lock().as_ref() {
