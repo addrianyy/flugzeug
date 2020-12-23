@@ -321,8 +321,8 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     // Cache page tables which will be used by all APs.
     *BOOT_BLOCK.page_table.lock() = Some(kernel_page_table);
 
-    println!("Kernel base is {:x}", elf.base_address());
-    println!("Kernel entrypoint is {:x}", elf.entrypoint());
+    println!("Kernel base is 0x{:x}.", elf.base_address());
+    println!("Kernel entrypoint is 0x{:x}.", elf.entrypoint());
 
     let entry_data = KernelEntryData {
         entrypoint: elf.entrypoint(),

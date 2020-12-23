@@ -4,7 +4,7 @@
 
 extern crate libc_routines;
 
-#[macro_use] mod serial;
+#[macro_use] mod print;
 
 mod framebuffer_resolutions;
 mod ap_entrypoint;
@@ -12,6 +12,7 @@ mod acpi_locator;
 mod framebuffer;
 mod binaries;
 mod kernel;
+mod serial;
 mod panic;
 mod efi;
 mod mm;
@@ -29,14 +30,14 @@ use boot_block::BootBlock;
 static BOOT_BLOCK:  BootBlock  = BootBlock::new();
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-
 #[no_mangle]
 extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) -> ! {
     if !INITIALIZED.load(Ordering::Relaxed) {
         // We are executing for the first time and we have EFI services available.
 
         unsafe {
-            serial::initialize();
+            // Initialize printing subsystem early so we can show errors.
+            print::initialize(system_table);
 
             // Get addresses of ACPI tables.
             acpi_locator::locate(system_table);
@@ -45,6 +46,10 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
             framebuffer::initialize(system_table);
 
             mm::initialize_and_exit_boot_services(image_handle, system_table);
+
+            // Serial should be initialized after exiting boot services. This way we
+            // make sure that we won't interfere with UEFI text output functions.
+            serial::initialize();
         }
 
         INITIALIZED.store(true, Ordering::Relaxed);

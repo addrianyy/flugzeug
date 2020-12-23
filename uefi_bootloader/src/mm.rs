@@ -198,14 +198,6 @@ pub unsafe fn initialize_and_exit_boot_services(image_handle: usize,
             continue;
         }
 
-        // If we have failed to exit boot servixes free the pool and try next time.
-        let status = (boot_services.exit_boot_services)(image_handle, map_key);
-        if  status != 0 {
-            assert_eq!((boot_services.free_pool)(pool), 0, "Freeing pool failed.");
-
-            continue;
-        }
-
         // Make sure that we have got valid results.
         assert!(desc_size >= core::mem::size_of::<efi::EfiMemoryDescriptor>(),
                 "Descriptor size is lower than our struct size.");
@@ -262,6 +254,17 @@ pub unsafe fn initialize_and_exit_boot_services(image_handle: usize,
             start: binary_base,
             end:   binary_end,
         });
+
+        // Even if we will fail to exit we won't be able to use EFI print services anymore.
+        crate::print::on_exited_boot_services();
+
+        // If we have failed to exit boot services free the pool and try next time.
+        let status = (boot_services.exit_boot_services)(image_handle, map_key);
+        if  status != 0 {
+            assert_eq!((boot_services.free_pool)(pool), 0, "Freeing pool failed.");
+
+            continue;
+        }
 
         break;
     }

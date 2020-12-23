@@ -49,6 +49,11 @@ pub type OpenProtocol = unsafe extern "efiapi" fn (
     attributes: u32,
 ) -> EfiStatus;
 
+pub type TextString = unsafe extern "efiapi" fn (
+    this:       *mut EfiSimpleTextOutputProtocol,
+    string:     *const u16,
+) -> EfiStatus;
+
 #[repr(C)]
 pub struct EfiTableHeader {
     pub signature:   u64,
@@ -123,19 +128,25 @@ pub struct EfiConfigurationTable {
 }
 
 #[repr(C)]
+pub struct EfiSimpleTextOutputProtocol {
+    pub reset:         usize,
+    pub output_string: TextString,
+}
+
+#[repr(C)]
 pub struct EfiSystemTable {
     pub header:            EfiTableHeader,
     pub firmware_vendor:   *const u16,
     pub firmware_revision: u32,
 
     pub stdin_handle: Handle,
-    pub stdin:        usize,
+    pub stdin:        *mut EfiSimpleTextOutputProtocol,
 
     pub stdout_handle: Handle,
-    pub stdout:        usize,
+    pub stdout:        *mut EfiSimpleTextOutputProtocol,
 
     pub stderr_handle: Handle,
-    pub stderr:        usize,
+    pub stderr:        *mut EfiSimpleTextOutputProtocol,
 
     pub runtime_services: *mut EfiRuntimeServices,
     pub boot_services:    *mut EfiBootServices,
