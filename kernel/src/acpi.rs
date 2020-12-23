@@ -105,7 +105,7 @@ pub unsafe fn initialize() {
             _ => panic!("Bootloader didn't provide address of any ACPI system table."),
         };
 
-        println!("Using {:?} system table at address 0x{:x}.", sdt_type, sdt_addr);
+        println!("Using {} system table at address 0x{:x}.", sdt_type, sdt_addr);
 
         // Get all subtables in the system table.
         parse_system_table(PhysAddr(sdt_addr), sdt_type)
@@ -113,14 +113,18 @@ pub unsafe fn initialize() {
 
     let mut apics = None;
 
-    for (header, payload, payload_size) in tables {
+    for (index, (header, payload, payload_size)) in tables.iter().enumerate() {
         if &header.signature == b"APIC" {
-            apics = Some(parse_madt(payload, payload_size));
+            apics = Some(parse_madt(*payload, *payload_size));
         }
 
         if true {
             if let Ok(signature) = core::str::from_utf8(&header.signature) {
                 println!("  {}: 0x{:x}", signature, payload.0);
+            }
+
+            if index + 1 == tables.len() {
+                println!();
             }
         }
     }
@@ -209,10 +213,18 @@ pub unsafe fn initialize() {
     }
 }
 
-#[derive(Debug)]
 enum SdtType {
     Rsdt,
     Xsdt,
+}
+
+impl core::fmt::Display for SdtType {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            SdtType::Rsdt => write!(f, "RSDT"),
+            SdtType::Xsdt => write!(f, "XSDT"),
+        }
+    }
 }
 
 unsafe fn parse_header(phys_addr: PhysAddr) -> (Header, Option<(PhysAddr, usize)>) {
@@ -246,7 +258,7 @@ unsafe fn parse_system_table(system_table: PhysAddr, sdt_type: SdtType)
 {
     let (sdt, payload) = parse_header(system_table);
     let (sdt_payload, sdt_size) = payload
-        .unwrap_or_else(|| panic!("{:?} checksum is invalid.", sdt_type));
+        .unwrap_or_else(|| panic!("{} checksum is invalid.", sdt_type));
 
     // Make sure that the signature matches and get entry size.
     let entry_size = match sdt_type {
@@ -268,7 +280,7 @@ unsafe fn parse_system_table(system_table: PhysAddr, sdt_type: SdtType)
     let entry_count = sdt_size / entry_size;
 
     // Make sure that the SDT size is valid.
-    assert!(sdt_size % entry_size == 0, "{:?} size is not divisible by entry size.", sdt_type);
+    assert!(sdt_size % entry_size == 0, "{} size is not divisible by entry size.", sdt_type);
 
     let mut tables = Vec::with_capacity(entry_count);
 
