@@ -384,6 +384,62 @@ pub unsafe fn on_finished_boot_process() {
         }
     }
 
-    println!("Reclaimed {}MB of boot memory. {}MB of available memory.",
-             total_reclaimed / (1024 * 1024), total_free / (1024 * 1024));
+    println!("Reclaimed {} of boot memory. {} of available memory.",
+             Memory(total_reclaimed), Memory(total_free));
+}
+
+#[allow(unused)]
+pub fn dump_memory_ranges() {
+    let entries  = {
+        let free_memory = core!().boot_block.free_memory.lock()
+            .as_ref()
+            .unwrap()
+            .clone();
+
+        let mut entries = alloc::vec::Vec::new();
+
+        for entry in free_memory.entries() {
+            entries.push((entry.start, entry.end + 1));
+        }
+
+        entries.sort_by(|(s1, _), (s2, _)| s1.cmp(&s2));
+
+        entries
+    };
+
+    for (start, end) in entries {
+        println!("{:010x} - {:010x} ({})", start, end, Memory(end - start));
+    }
+}
+
+struct Memory(u64);
+
+impl core::fmt::Display for Memory {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        let kb = self.0 as f64 / 1024.0;
+        let mb = kb / 1024.0;
+        let gb = mb / 1024.0;
+
+        const TRESHOLD: f64 = 0.8;
+
+        macro_rules! write_unit {
+            ($amount: expr, $name: expr) => {
+                if $amount >= TRESHOLD {
+                    let total = $amount as u64 as f64;
+                    let diff  = $amount - total;
+                    if  diff >= 0.1 {
+                        return write!(f, "{:.1} {}", $amount, $name);
+                    } else {
+                        return write!(f, "{} {}", total, $name);
+                    }
+                }
+            }
+        }
+
+        write_unit!(gb, "GB");
+        write_unit!(mb, "MB");
+        write_unit!(kb, "KB");
+
+        write!(f, "{} B", self.0)
+    }
 }

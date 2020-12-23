@@ -113,7 +113,7 @@ pub struct EfiBootServices {
 }
 
 #[derive(PartialEq, Eq)]
-#[repr(C)]
+#[repr(C, align(8))]
 pub struct EfiGuid(pub u32, pub u16, pub u16, pub [u8; 8]);
 
 #[repr(C)]
