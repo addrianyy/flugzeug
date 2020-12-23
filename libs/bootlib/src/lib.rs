@@ -6,7 +6,7 @@ pub fn verify_cpu() {
     macro_rules! verify_feature {
         ($name: ident) => {
             assert!(features.$name, "CPU feature \"{}\" is required but not \
-                    supported by this CPU.", stringify!($name));
+                    supported by this CPU. Cannot launch kernel.", stringify!($name));
         }
     }
 

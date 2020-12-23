@@ -37,7 +37,7 @@ impl core::fmt::Write for ConsoleWriter {
             }
         }
 
-        // Encode string to UTF-16 as required by UEFI.
+        // Encode string to UTF-16 as required by the UEFI.
         for ch in string.encode_utf16() {
             // Change or `\n` to `\r\n`.
             if ch == b'\n' as u16 {

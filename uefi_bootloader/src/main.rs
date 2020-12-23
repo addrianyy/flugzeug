@@ -39,6 +39,9 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
             // Initialize printing subsystem early so we can show errors.
             print::initialize(system_table);
 
+            // Verify the CPU before exiting boot services so we can print errors.
+            bootlib::verify_cpu();
+
             // Get addresses of ACPI tables.
             acpi_locator::locate(system_table);
 
@@ -54,22 +57,20 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
 
         INITIALIZED.store(true, Ordering::Relaxed);
     } else {
+        bootlib::verify_cpu();
+
         // AP entrypoint should pass zeroes here because EFI is unavailable.
         assert!(image_handle == 0 && system_table == core::ptr::null_mut(),
                 "Invalid arguments passed to the bootloader.");
     }
 
-    // Zero out the IDT so if there is any exception we will triple fault.
-    unsafe {
-        cpu::zero_idt();
-    }
-
-    bootlib::verify_cpu();
-
     // No allocations should be done here to ensure that we will have enough low memory
     // to create AP entrypoint.
 
     unsafe {
+        // Zero out the IDT so if there is any exception we will triple fault.
+        cpu::zero_idt();
+
         kernel::enter();
     }
 }

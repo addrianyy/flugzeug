@@ -131,6 +131,8 @@ pub struct EfiConfigurationTable {
 pub struct EfiSimpleTextOutputProtocol {
     pub reset:         usize,
     pub output_string: TextString,
+
+    // WARNING: Incomplete definition. There are fields after `output_string`.
 }
 
 #[repr(C)]
