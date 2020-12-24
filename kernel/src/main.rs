@@ -12,6 +12,7 @@ mod acpi;
 mod font;
 mod time;
 mod panic;
+mod processors;
 mod interrupts;
 mod framebuffer;
 mod interrupts_misc;
@@ -40,12 +41,15 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         apic::initialize();
 
         if core!().id == 0 {
-            // Launch APs.
             acpi::initialize();
+            time::initialize();
+
+            // Launch APs.
+            processors::initialize();
         }
 
         // Notify that this core is online and wait for other cores.
-        acpi::notify_core_online();
+        processors::notify_core_online();
 
         if core!().id == 0 {
             // All cores are now launched and we have finished boot process.

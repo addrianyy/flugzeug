@@ -1,7 +1,8 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE, PAGE_NX};
+use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
+                 PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE};
 use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
                  KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING};
 
@@ -110,6 +111,33 @@ pub fn reserve_virt_addr(size: usize) -> VirtAddr {
     address.checked_add(reserve).expect("Heap virtual address overflowed.");
 
     VirtAddr(address)
+}
+
+pub unsafe fn map_mmio(phys_addr: PhysAddr, size: u64, cache_enable: bool) -> VirtAddr {
+    assert!(phys_addr.0 & 0xfff == 0, "MMIO base {:x} is not page aligned.", phys_addr.0);
+    assert!(size        & 0xfff == 0, "MMIO size {:x} is not page aligned.", size);
+
+    let virt_addr = reserve_virt_addr(size as usize);
+
+    let mut page_table = core!().boot_block.page_table.lock();
+    let page_table     = page_table.as_mut().unwrap();
+
+    for offset in (0..size).step_by(4096) {
+        let phys_addr = phys_addr.0 + offset;
+        let virt_addr = VirtAddr(virt_addr.0 + offset);
+
+        let mut backing = PAGE_PRESENT | PAGE_WRITE | PAGE_NX | phys_addr;
+
+        if !cache_enable {
+            backing |= PAGE_CACHE_DISABLE;
+        }
+
+        page_table.map_raw(&mut PhysicalMemory, virt_addr, PageType::Page4K,
+                           backing, true, false)
+            .expect("Failed to map MMIO to the virtual memory.");
+    }
+
+    virt_addr
 }
 
 /// Amount of memory used by the stack metadata in `FreeListNode`.

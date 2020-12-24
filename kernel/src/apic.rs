@@ -1,4 +1,4 @@
-use page_table::{PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_CACHE_DISABLE, PAGE_NX};
+use page_table::PhysAddr;
 use crate::mm;
 
 const IA32_APIC_BASE: u32 = 0x1b;
@@ -140,17 +140,7 @@ pub unsafe fn initialize() {
     cpu::wrmsr(IA32_APIC_BASE, state);
 
     let mut apic = if !x2apic {
-        let mut page_table = core!().boot_block.page_table.lock();
-        let page_table     = page_table.as_mut().unwrap();
-
-        // Reserve 4K of memory for the APIC virtual region.
-        let virt_addr = mm::reserve_virt_addr(4096);
-
-        // Map APIC memory as writable, non-executable and non-cachable.
-        page_table.map_raw(&mut mm::PhysicalMemory, virt_addr, PageType::Page4K,
-                           PAGE_PRESENT | PAGE_WRITE | PAGE_CACHE_DISABLE | PAGE_NX | APIC_BASE,
-                           true, false)
-            .expect("Failed to map APIC to the virtual memory.");
+        let virt_addr = mm::map_mmio(PhysAddr(APIC_BASE), 4096, false);
 
         // Highest APIC register is at address 0x3f0, so whole mapping needs to be 0x400 bytes.
         Apic::XApic(core::slice::from_raw_parts_mut(virt_addr.0 as *mut u32,

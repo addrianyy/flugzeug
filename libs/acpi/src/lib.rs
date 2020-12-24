@@ -33,3 +33,25 @@ pub struct Header {
     pub creator_id:       u32,
     pub creator_revision: u32,
 }
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+pub struct Address {
+    pub address_space:        u8,
+    pub register_bit_width:   u8,
+    pub register_bit_offset:  u8,
+    pub reserved:             u8,
+    pub address:              u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+pub struct HpetPayload {
+    pub hardware_rev:    u8,
+    pub flags:           u8,
+    pub pci_vendor_id:   u16,
+    pub address:         Address,
+    pub hpet_number:     u8,
+    pub minimum_tick:    u16,
+    pub page_protection: u8,
+}

@@ -1,8 +1,9 @@
+use alloc::{vec, boxed::Box};
+
 use boot_block::{FramebufferInfo, PixelFormat};
-use page_table::{PageType, PAGE_PRESENT, PAGE_WRITE, PAGE_NX, VirtAddr};
+use page_table::PhysAddr;
 use crate::{mm, font};
 use lock::Lock;
-use alloc::{vec, boxed::Box};
 
 pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 
@@ -33,24 +34,8 @@ impl Framebuffer {
         assert!(info.width > 0 && info.height > 0, "Framebuffer is empty");
 
         let mmio = {
-            let mut page_table = core!().boot_block.page_table.lock();
-            let page_table     = page_table.as_mut().unwrap();
-
             let aligned_size = (info.fb_size + 0xfff) & !0xfff;
-            let virt_addr    = mm::reserve_virt_addr(aligned_size as usize);
-
-            // Map framebuffer into virtual memory.
-            for offset in (0..aligned_size).step_by(4096) {
-                // PAGE_CACHE_DISABLE doesn't seem to be needed here and enabling it causes
-                // huge slowdown on VM.
-                let fb_phys   = info.fb_base + offset;
-                let backing   = PAGE_PRESENT | PAGE_WRITE | PAGE_NX | fb_phys;
-                let virt_addr = VirtAddr(virt_addr.0 + offset);
-
-                page_table.map_raw(&mut mm::PhysicalMemory, virt_addr, PageType::Page4K,
-                                   backing, true, false)
-                    .expect("Failed to map framebuffer to the virtual memory.");
-            }
+            let virt_addr    = mm::map_mmio(PhysAddr(info.fb_base), aligned_size, true);
 
             let buffer_ptr  = virt_addr.0 as *mut u32;
             let buffer_size = (info.fb_size as usize) / core::mem::size_of::<u32>();
