@@ -45,6 +45,7 @@ pub struct CpuFeatures {
     pub avx512f: bool,
     pub page2m: bool,
     pub page1g: bool,
+    pub invariant_tsc: bool,
 }
 
 pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
@@ -112,6 +113,12 @@ pub fn get_features() -> CpuFeatures {
         features.page1g      = ((cpuid.edx >> 26) & 1) == 1;
         features.rdtscp      = ((cpuid.edx >> 27) & 1) == 1;
         features.bits64      = ((cpuid.edx >> 29) & 1) == 1;
+    }
+
+    if max_extended_cpuid >= 0x80000007 {
+        let cpuid = cpuid(0x80000007, 0);
+
+        features.invariant_tsc = ((cpuid.edx >> 8) & 1) == 1;
     }
 
     features

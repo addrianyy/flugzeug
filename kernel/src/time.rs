@@ -11,19 +11,6 @@ pub fn get_tsc() -> u64 {
     }
 }
 
-/*
-unsafe fn initialize_hpet(payload: PhysAddr, payload_size: usize) {
-    assert!(payload_size >= core::mem::size_of::<acpi::HpetPayload>(),
-            "Invalid HPET payload size {}.", payload_size);
-
-    let payload: acpi::HpetPayload = mm::read_phys_unaligned(payload);
-
-    assert!(payload.address.address_space == 0, "HPET is not memory mapped.");
-
-    let mut hpet = Hpet::new(PhysAddr(payload.address.address));
-}
-*/
-
 struct Hpet {
     registers:    &'static mut [u64],
     timers:       usize,
@@ -44,7 +31,8 @@ impl Hpet {
     }
 
     unsafe fn get_capabilities(&mut self) {
-        let capabilities = self.read(0x000);
+        // General Capabilities and ID Register.
+        let capabilities = self.read(0x00);
 
         // This read-only field indicates the period at which the counter
         // increments in femptoseconds (10^-15 seconds).
@@ -170,26 +158,37 @@ unsafe fn create_hpet() -> Hpet {
 }
 
 pub unsafe fn initialize() {
+    // Amount of milliseconds that our TSC calibration will take.
+    const CALIBRATION_MS: u128 = 50;
+
+    const FEMTOSECONDS_IN_SECOND: u128 = 1_000_000_000_000_000;
+
+    // Check if CPU supports invariant TSC which we rely on. This isn't hard error as some
+    // VMs report that it's not supported and we want to test the kernel on them anyways.
+    if !cpu::get_features().invariant_tsc {
+        println!("WARNING: Timing may be off because CPU doesn't support invariant TSC.");
+    }
+
+    // Create HPET that we will use to calibrate TSC.
     let mut hpet = create_hpet();
 
-    // Amount of milliseconds that our TSC calibration will take.
-    let calibration_ms = 50;
-
-    // Convert milliseconds to femtoseconds used by the HPET.
-    let calibration_fs = (calibration_ms as u128)
-        .checked_mul(1_000_000_000_000)
+    // Convert calibration milliseconds to femtoseconds.
+    let calibration_fs = CALIBRATION_MS
+        .checked_mul(FEMTOSECONDS_IN_SECOND / 1000)
         .expect("Cannot convert calibration milliseconds to femtoseconds.");
 
-    // Get the number of HPET clocks that correspond to `calibration_ms` milliseconds.
-    let calibration_clocks = calibration_fs / (hpet.clock_period as u128);
+    // Get the number of HPET clocks that correspond to `CALIBRATION_MS` milliseconds.
+    let calibration_clocks      = calibration_fs / (hpet.clock_period as u128);
     let calibration_clocks: u64 = calibration_clocks.try_into()
         .expect("Cannot fit calibration clocks in 64 bit integer.");
 
+    // Start the calibration.
     hpet.set_enabled(true);
 
     let start_counter = hpet.counter();
     let start_tsc     = crate::time::get_tsc();
 
+    // Run for about `CALIBRATION_MS` milliseconds.
     while hpet.counter() < start_counter + calibration_clocks {}
     
     let end_counter = hpet.counter();
@@ -200,11 +199,18 @@ pub unsafe fn initialize() {
     let counter_delta = end_counter - start_counter;
     let tsc_delta     = end_tsc - start_tsc;
 
+    // Calculate the amount of elapsed femtoseconds.
     let elapsed_fs = (counter_delta as u128).checked_mul(hpet.clock_period as u128)
         .expect("Failed to fit elapsed femtoseconds in 128 bit integer.");
-    let fs_per_cycle = elapsed_fs.checked_div(tsc_delta as u128)
-        .expect("Failed to get femtoseconds per cycle.");
-    let hz = 1_000_000_000_000_000u128 / fs_per_cycle;
 
-    println!("{}", hz / 1000);
+    // Calculate how much femtoseconds every cycle takes.
+    let fs_per_cycle = elapsed_fs.checked_div(tsc_delta as u128)
+        .expect("Failed to calculate femtoseconds per cycle.");
+
+    // Calculate the TSC frequency.
+    let hz       = FEMTOSECONDS_IN_SECOND / fs_per_cycle;
+    let khz: u64 = (hz / 1000).try_into()
+        .expect("Failed to fit TSC frequency (KHz) in 64 bit integer.");
+
+    println!("TSC frequency: {} KHz.", khz);
 }
