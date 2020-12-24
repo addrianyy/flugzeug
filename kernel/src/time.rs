@@ -11,6 +11,15 @@ pub fn get_tsc() -> u64 {
     }
 }
 
+#[inline(always)]
+fn get_tsc_ordered() -> u64 {
+    let mut aux = 0;
+
+    unsafe {
+        core::arch::x86_64::__rdtscp(&mut aux)
+    }
+}
+
 struct Hpet {
     registers:    &'static mut [u64],
     timers:       usize,
@@ -186,13 +195,13 @@ pub unsafe fn initialize() {
     hpet.set_enabled(true);
 
     let start_counter = hpet.counter();
-    let start_tsc     = crate::time::get_tsc();
+    let start_tsc     = get_tsc_ordered();
 
     // Run for about `CALIBRATION_MS` milliseconds.
     while hpet.counter() < start_counter + calibration_clocks {}
     
     let end_counter = hpet.counter();
-    let end_tsc     = crate::time::get_tsc();
+    let end_tsc     = get_tsc_ordered();
 
     hpet.set_enabled(false);
 
