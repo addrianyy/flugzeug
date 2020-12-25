@@ -37,6 +37,11 @@ pub fn global_uptime() -> f64 {
     time_difference(BOOT_TSC.load(Ordering::Relaxed), get_tsc())
 }
 
+#[allow(unused)]
+pub fn uptime_with_firmware() -> f64 {
+    time_difference(0, get_tsc())
+}
+
 #[inline(always)]
 pub fn get_tsc() -> u64 {
     unsafe {
@@ -82,6 +87,7 @@ pub unsafe fn initialize() {
 
     // Check if CPU supports invariant TSC which we rely on. This isn't hard error as some
     // VMs report that it's not supported and we want to test the kernel on them anyways.
+    // Timing on these VMs isn't that bad anyways.
     if !cpu::get_features().invariant_tsc {
         println!("WARNING: Timing may be off because CPU doesn't support invariant TSC.");
     }
