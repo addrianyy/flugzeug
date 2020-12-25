@@ -120,34 +120,45 @@ struct Font {
     visual_height: usize,
     x_padding:     usize,
     y_padding:     usize,
+    x_scale:       usize,
+    y_scale:       usize,
 }
 
 impl Font {
-    fn new(data: &'static [u8], width: usize, height: usize,
-           x_padding: usize, y_padding: usize) -> Self {
+    fn new(
+        data:     &'static [u8],
+        width:    usize,
+        height:   usize,
+        x_padding:usize,
+        y_padding:usize,
+        x_scale:  usize,
+        y_scale:  usize,
+    ) -> Self {
         assert!(width  == 8, "Font width must be equal to 8.");
         assert!(height >  0, "Font height cannot be 0.");
+
+        assert!(x_scale > 0, "X scale cannot be 0.");
+        assert!(y_scale > 0, "Y scale cannot be 0.");
 
         Self {
             data,
             width,
             height,
-            visual_width:  width  + x_padding * 2,
-            visual_height: height + y_padding * 2,
+            visual_width:  width  * x_scale + x_padding * 2,
+            visual_height: height * y_scale + y_padding * 2,
             x_padding,
             y_padding,
+            x_scale,
+            y_scale,
         }
     }
 
     fn draw(&self, ch: u8, x: usize, y: usize, foreground: u32, background: u32,
-            framebuffer: &mut Framebuffer) {
+            line_buffer: &mut [u32], framebuffer: &mut Framebuffer) {
         let index     = (ch as usize) * self.height;
         let char_data = &self.data[index..][..self.height];
 
-        for oy in 0..self.height {
-            let line_data  = char_data[oy];
-            let mut colors = [0u32; 8];
-
+        for (oy, &line_data) in char_data.iter().enumerate().take(self.height) {
             if line_data == 0 {
                 continue;
             }
@@ -156,13 +167,21 @@ impl Font {
                 let set   = line_data & (1 << (7 - ox)) != 0;
                 let color = if set { foreground } else { background };
 
-                colors[ox] = color;
+                for index in 0..self.x_scale {
+                    line_buffer[ox * self.x_scale + index] = color;
+                }
             }
 
-            framebuffer.set_pixels_in_line(x + self.x_padding,
-                                           y + oy + self.y_padding,
-                                           &colors);
+            for index in 0..self.y_scale {
+                framebuffer.set_pixels_in_line(x + self.x_padding,
+                                               y + self.y_padding + oy * self.y_scale + index,
+                                               line_buffer);
+            }
         }
+    }
+
+    fn line_size(&self) -> usize {
+        self.width * self.x_scale
     }
 }
 
@@ -178,11 +197,13 @@ pub struct TextFramebuffer {
     background:         u32,
     foreground:         u32,
     default_foreground: u32,
+
+    line_buffer: Box<[u32]>,
 }
 
 impl TextFramebuffer {
     fn new(framebuffer: Framebuffer) -> Self {
-        let font = Font::new(&font::FONT, 8, font::HEIGHT, 1, 1);
+        let font = Font::new(&font::FONT, 8, font::HEIGHT, 1, 1, 1, 1);
 
         let width  = framebuffer.width  / font.visual_width;
         let height = framebuffer.height / font.visual_height;
@@ -194,6 +215,8 @@ impl TextFramebuffer {
         let default_foreground = framebuffer.convert_color(DEFAULT_FOREGROUND_COLOR);
 
         let mut text_fb = Self {
+            line_buffer: vec![0u32; font.line_size()].into_boxed_slice(),
+
             font,
             x: 0,
             y: 0,
@@ -321,7 +344,8 @@ impl TextFramebuffer {
             let x = self.x * self.font.visual_width;
             let y = self.y * self.font.visual_height;
 
-            self.font.draw(byte, x, y, self.foreground, self.background, &mut self.framebuffer);
+            self.font.draw(byte, x, y, self.foreground, self.background,
+                           &mut self.line_buffer, &mut self.framebuffer);
         }
 
         // Move cursor one position to the right.

@@ -238,6 +238,9 @@ pub unsafe fn initialize() {
 
         // Wait for the core to become online. Bootloader is not thread safe so there can
         // be only one launching AP at a time.
+        //
+        // If core panics while executing in kernel it will print panic message and we will spin
+        // here forever.
         while core_state(apic_id) != CoreState::Online {
             core::sync::atomic::spin_loop_hint();
         }
