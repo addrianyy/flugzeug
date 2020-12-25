@@ -4,46 +4,66 @@
 
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 #[repr(C)]
 pub struct Lock<T: ?Sized> {
-    ticket:  AtomicU32,
-    release: AtomicU32,
-    value:   UnsafeCell<T>,
+    locked: AtomicBool,
+    value:  UnsafeCell<T>,
 }
 
 impl<T> Lock<T> {
     pub const fn new(value: T) -> Self {
         Lock {
-            value:   UnsafeCell::new(value),
-            ticket:  AtomicU32::new(0),
-            release: AtomicU32::new(0),
+            value:  UnsafeCell::new(value),
+            locked: AtomicBool::new(false),
         }
     }
 }
 
 impl<T: ?Sized> Lock<T> {
-    pub fn lock(&self) -> LockGuard<T> {
-        let ticket = self.ticket.fetch_add(1, Ordering::SeqCst);
+    #[inline(always)]
+    pub fn is_locked(&self) -> bool {
+        self.locked.load(Ordering::Relaxed)
+    }
 
-        while self.release.load(Ordering::SeqCst) != ticket {
-            core::sync::atomic::spin_loop_hint();
+    #[inline(always)]
+    pub fn lock(&self) -> LockGuard<T> {
+        while self.locked.compare_exchange_weak(false, true, Ordering::Acquire,
+                                                Ordering::Relaxed).is_err() {
+            while self.is_locked() {
+                core::sync::atomic::spin_loop_hint();
+            }
         }
 
         LockGuard {
-            lock: self,
+            lock:  self,
+            value: unsafe { &mut *self.value.get() },
+        }
+    }
+
+    #[inline(always)]
+    pub fn try_lock(&self) -> Option<LockGuard<T>> {
+        if self.locked.compare_exchange(false, true, Ordering::Acquire,
+                                        Ordering::Relaxed).is_ok() {
+            Some(LockGuard {
+                lock:  self,
+                value: unsafe { &mut *self.value.get() },
+            })
+        } else {
+            None
         }
     }
 }
 
 pub struct LockGuard<'a, T: ?Sized> {
-    lock: &'a Lock<T>,
+    lock:  &'a Lock<T>,
+    value: &'a mut T,
 }
 
 impl<'a, T: ?Sized> Drop for LockGuard<'a, T> {
     fn drop(&mut self) {
-        self.lock.release.fetch_add(1, Ordering::SeqCst);
+        self.lock.locked.store(false, Ordering::Release);
     }
 }
 
@@ -51,17 +71,13 @@ impl<'a, T: ?Sized> Deref for LockGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe {
-            &*self.lock.value.get()
-        }
+        self.value
     }
 }
 
 impl<'a, T: ?Sized> DerefMut for LockGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe {
-            &mut *self.lock.value.get()
-        }
+        self.value
     }
 }
 

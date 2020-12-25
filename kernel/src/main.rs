@@ -49,6 +49,10 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
             processors::initialize();
         }
 
+        color_println!(0x00ffff, "Core initialized in {:.2}ms. Core ID: {}. APIC ID {:?}. \
+                       Using {:?}.", time::local_uptime() * 1000.0, core!().id,
+                       core!().apic_id(), core!().apic_mode());
+
         // Notify that this core is online and wait for other cores.
         processors::notify_core_online();
 
@@ -58,18 +62,6 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
             mm::on_finished_boot_process();
         }
     }
-
-    let cs: u16;
-    let ds: u16;
-
-    unsafe {
-        asm!("mov ax, cs", out("ax") cs);
-        asm!("mov ax, ds", out("ax") ds);
-    }
-
-    color_println!(0x00ffff, "Core initialized in {:.2}ms. Core ID: {}. APIC ID {:?}. \
-                   CS 0x{:x}, DS 0x{:x}. Using {:?}.", time::local_uptime() * 1000.0,
-                   core!().id, core!().apic_id(), cs, ds, core!().apic_mode());
 
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen! Firmware took {:.2}s, \
