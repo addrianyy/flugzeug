@@ -195,7 +195,7 @@ fn dump_page_fault(writer: &mut EmergencyWriter, frame: &InterruptFrame, error: 
     let action = if id {
         "execute"
     } else if wr {
-        "write"
+        "write to"
     } else {
         "read"
     };
