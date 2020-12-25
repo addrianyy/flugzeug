@@ -5,16 +5,9 @@ use page_table::PhysAddr;
 use crate::{mm, font};
 use lock::Lock;
 
-use core::sync::atomic::{AtomicU64, Ordering};
-
 pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 
-static FRAMEBUFFER:   Lock<Option<TextFramebuffer>> = Lock::new(None);
-static PROFILE_VALUE: AtomicU64 = AtomicU64::new(0);
-
-pub fn get_profile() -> u64 {
-    PROFILE_VALUE.load(Ordering::Relaxed)
-}
+static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
 
 enum ColorMode {
     RGB,
@@ -39,6 +32,7 @@ impl Framebuffer {
         assert!(info.fb_size % 4 == 0, "Framebuffer size is not 4 byte aligned.");
         assert!(info.fb_base     != 0, "Framebuffer is null.");
         assert!(info.width > 0 && info.height > 0, "Framebuffer is empty");
+        assert!(info.pixels_per_scanline >= (32 / 4), "Too small amount of pixels per scanline.");
 
         let mmio = {
             // Use write-combining memory type for MMIO.
@@ -207,12 +201,23 @@ pub struct TextFramebuffer {
     default_foreground: u32,
 
     line_buffer: Box<[u32]>,
-    text:        Box<[u8]>,
+    text:        Box<[u32]>,
 }
 
 impl TextFramebuffer {
+    fn encode_colored_character(ch: u8, mut color: u32) -> u32 {
+        assert!(color & 0xff00_0000 == 0, "Reserved color bits aren't zero.");
+
+        // Ignore color for empty characters.
+        if ch == b'\0' || ch == b' ' {
+            color = 0;
+        }
+
+        color | (ch as u32) << 24
+    }
+
     fn new(framebuffer: Framebuffer) -> Self {
-        // Pick higher scale above some treshold so text isn't too small.
+        // Pick higher scale above some threshold to make sure that text isn't too small.
         let scale = if framebuffer.width * framebuffer.height > 2560 * 1440 {
             2
         } else {
@@ -229,10 +234,11 @@ impl TextFramebuffer {
 
         let background         = framebuffer.convert_color(0x000000);
         let default_foreground = framebuffer.convert_color(DEFAULT_FOREGROUND_COLOR);
+        let empty_char         = Self::encode_colored_character(b' ', default_foreground);
 
         let mut text_fb = Self {
-            line_buffer: vec![0u32; font.line_size()].into_boxed_slice(),
-            text:        vec![0u8;  width * height].into_boxed_slice(),
+            line_buffer: vec![0u32;       font.line_size()].into_boxed_slice(),
+            text:        vec![empty_char; width * height].into_boxed_slice(),
 
             font,
             x: 0,
@@ -252,90 +258,143 @@ impl TextFramebuffer {
         text_fb
     }
 
-    fn split(&self) -> LineSplit {
-        LineSplit::new(self.framebuffer.width)
+    fn split_text_line(&self) -> LineSplit {
+        // TODO: Pick some good value here (heuristics?).
+        // The higher framebuffer width the higher this value should be.
+        // The higher console width the higher this value should be.
+        // 16, 32, 64 seem to work well.
+        LineSplit::new(self.width, 32)
     }
 
     fn scroll(&mut self) {
-        let mut cycles_spent = 0;
+        // Split text characters.
+        let split = self.split_text_line();
 
-        // We move up every text line except the first one.
-        let graphics_lines_to_copy = (self.height - 1) * self.font.visual_height;
-        let split                  = self.split();
+        // We can use `copy_32` on text only if difference between `from` and `to` is >=
+        // than block copy size (32 bytes).
+        let vectorized_copy_text = self.width >= (32 / 4);
 
         // Move every line one line up (except the first one).
         // As there is overlap and source > destination we need to copy forwards.
-        for line_index in 0..graphics_lines_to_copy {
-            // Copy from the next line to the current one.
-            let from_y = line_index + self.font.visual_height;
-            let to_y   = line_index;
+        for text_y in 0..(self.height - 1) {
+            let from_text_y = text_y + 1;
+            let to_text_y   = text_y;
 
-            // Calculate buffer indices from graphics Y position.
-            let from_index = from_y * self.framebuffer.pixels_per_scanline;
-            let to_index   = to_y   * self.framebuffer.pixels_per_scanline;
+            // Divide the text line into parts and copy only parts where
+            // `from` is different than `to`.
+            split.split(|text_x, text_size| {
+                {
+                    // Calculate text indices in the buffer.
+                    let from_text_index = from_text_y * self.width + text_x;
+                    let to_text_index   = to_text_y   * self.width + text_x;
 
-
-            // Divide the line into parts and copy only parts where `from` is different than `to`.
-            split.split(|x, size| {
-                let from_index = from_index + x;
-                let to_index   = to_index   + x;
-
-                let start_tsc = crate::time::get_tsc();
-
-                let equal = unsafe {
-                    compare_32(self.framebuffer.buffer[from_index..].as_ptr(),
-                               self.framebuffer.buffer[to_index..].as_ptr(),
-                               size)
-                };
-
-                let delta = crate::time::get_tsc() - start_tsc;
-                cycles_spent += delta;
-
-                // If parts are equal we don't need to copy anything.
-                if !equal {
-                    let c_from      = self.framebuffer.buffer[from_index..].as_ptr();
-                    let c_to        = self.framebuffer.buffer[to_index..].as_mut_ptr();
-                    let c_to_mmio   = self.framebuffer.mmio[to_index..].as_mut_ptr();
+                    let from = self.text[from_text_index..][..text_size].as_mut_ptr();
+                    let to   = self.text[to_text_index  ..][..text_size].as_mut_ptr();
 
                     unsafe {
-                        dual_copy_32(c_from, c_to_mmio, c_to, size);
+                        // If all characters in `from` are the same as in `to` then we don't need
+                        // to copy anything and we can just return.
+                        if compare_32(from, to, text_size) {
+                            return;
+                        }
+
+                        if vectorized_copy_text {
+                            copy_32(from, to, text_size);
+                        } else {
+                            for index in 0..text_size {
+                                *to.add(index) = *from.add(index);
+                            }
+                        }
+                    }
+                }
+
+                let graphics_x    = text_x    * self.font.visual_width;
+                let graphics_size = text_size * self.font.visual_width;
+
+                // We know that text is different in this line. We need to copy the pixel buffer.
+                // Go through every graphics line and check if it is different. If it is then
+                // copy it.
+                for graphics_y in ((text_y + 0) * self.font.visual_height)..
+                                  ((text_y + 1) * self.font.visual_height) {
+                    let from_y = graphics_y + self.font.visual_height;
+                    let to_y   = graphics_y;
+
+                    let from_index = from_y * self.framebuffer.pixels_per_scanline + graphics_x;
+                    let to_index   = to_y   * self.framebuffer.pixels_per_scanline + graphics_x;
+
+                    let equal = unsafe {
+                        compare_32(self.framebuffer.buffer[from_index..].as_ptr(),
+                                   self.framebuffer.buffer[to_index..].as_ptr(),
+                                   graphics_size)
+                    };
+
+                    // If parts are equal we don't need to copy anything.
+                    if !equal {
+                        let c_from      = self.framebuffer.buffer[from_index..].as_ptr();
+                        let c_to        = self.framebuffer.buffer[to_index..].as_mut_ptr();
+                        let c_to_mmio   = self.framebuffer.mmio[to_index..].as_mut_ptr();
+
+                        unsafe {
+                            dual_copy_32(c_from, c_to_mmio, c_to, graphics_size);
+                        }
                     }
                 }
             });
         }
-
-        PROFILE_VALUE.store(cycles_spent, Ordering::Relaxed);
     }
 
     fn clear_line(&mut self, text_y: usize) {
-        let split   = self.split();
-        let color   = self.background;
-        let start_y = text_y * self.font.visual_height;
+        // Split text characters.
+        let split = self.split_text_line();
 
-        // Go through every graphics line coresponding to text line and clear it.
-        for y in start_y..(start_y + self.font.visual_height) {
-            let index = y * self.framebuffer.pixels_per_scanline;
+        let color     = self.background;
+        let character = Self::encode_colored_character(b' ', color);
 
-            // Divide the line into parts and clear only parts which aren't already clear.
-            split.split(|x, size| {
-                let index = index + x;
+        // Divide the text line into parts and clear only parts which are not clear.
+        split.split(|text_x, text_size| {
+            {
+                let text_index = text_y * self.width + text_x;
+                let text_ptr   = self.text[text_index..][..text_size].as_mut_ptr();
+
+                unsafe {
+                    // If all characters are clear then we don't need to copy anything and
+                    // we can just return.
+                    if compare_single_32(text_ptr, character, text_size) {
+                        return;
+                    }
+
+                    // Clear this text line.
+                    set_32(text_ptr, character, text_size);
+                }
+            }
+
+            let graphics_x    = text_x    * self.font.visual_width;
+            let graphics_size = text_size * self.font.visual_width;
+
+            // We know that text is not clear in this part. We need to clear the pixel buffer.
+            // Go through every graphics line and check if it is not clear. If it is not then
+            // clear it.
+            for graphics_y in ((text_y + 0) * self.font.visual_height)..
+                              ((text_y + 1) * self.font.visual_height) {
+                let graphics_index = graphics_y * self.framebuffer.pixels_per_scanline +
+                    graphics_x;
+
                 let equal = unsafe {
-                    compare_single_32(self.framebuffer.buffer[index..].as_ptr(), color, size)
+                    compare_single_32(self.framebuffer.buffer[graphics_index..].as_ptr(),
+                                      color, graphics_size)
                 };
 
-                // If part is clear we don't need to clear anything.
+                // If parts are equal we don't need to copy anything.
                 if !equal {
-                    let c_mmio   = self.framebuffer.mmio[index..].as_mut_ptr();
-                    let c_buffer = self.framebuffer.buffer[index..].as_mut_ptr();
+                    let c_mmio   = self.framebuffer.mmio[graphics_index..].as_mut_ptr();
+                    let c_buffer = self.framebuffer.buffer[graphics_index..].as_mut_ptr();
 
                     unsafe {
-                        dual_set_32(c_mmio, c_buffer, color, size);
+                        dual_set_32(c_mmio, c_buffer, color, graphics_size);
                     }
                 }
-            });
-        }
-
-        self.text[text_y * self.width..][..self.width].iter_mut().for_each(|x| *x = 0);
+            }
+        });
     }
 
     fn newline(&mut self) {
@@ -370,7 +429,9 @@ impl TextFramebuffer {
 
         // Draw the character.
         {
-            self.text[self.x + self.y * self.width] = byte;
+            // Update colored character that we are drawing now.
+            let character = Self::encode_colored_character(byte, self.foreground);
+            self.text[self.x + self.y * self.width] = character;
 
             let x = self.x * self.font.visual_width;
             let y = self.y * self.font.visual_height;
@@ -462,6 +523,38 @@ pub fn get() -> &'static Lock<Option<TextFramebuffer>> {
 const ELEMENTS_PER_VECTOR: usize = 32 / 4;
 const ALIGN_MASK:          usize = ELEMENTS_PER_VECTOR - 1;
 
+unsafe fn copy_32(from: *const u32, to: *mut u32, size: usize) {
+    let vectorized_copy_size = size & !ALIGN_MASK;
+    if  vectorized_copy_size > 0 {
+        asm!(
+            r#"
+            2:
+                vmovups ymm0, [rsi]
+                vmovups [rdi], ymm0
+                add rsi, 32
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            "#,
+            inout("rsi") from                     => _,
+            inout("rdi") to                       => _,
+            inout("rcx") vectorized_copy_size * 4 => _,
+            out("ymm0") _,
+        );
+    }
+
+    let left_to_copy = size - vectorized_copy_size;
+    if  left_to_copy > 0 {
+        let start_index = vectorized_copy_size;
+        for index in 0..left_to_copy {
+            let index = start_index + index;
+            let value = *from.add(index);
+
+            *to.add(index) = value;
+        }
+    }
+}
+
 unsafe fn dual_copy_32(from: *const u32, to1: *mut u32, to2: *mut u32, size: usize) {
     let vectorized_copy_size = size & !ALIGN_MASK;
     if  vectorized_copy_size > 0 {
@@ -494,6 +587,38 @@ unsafe fn dual_copy_32(from: *const u32, to1: *mut u32, to2: *mut u32, size: usi
 
             *to1.add(index) = value;
             *to2.add(index) = value;
+        }
+    }
+}
+
+unsafe fn set_32(target: *mut u32, value: u32, size: usize) {
+    let vectorized_set_size = size & !ALIGN_MASK;
+    if  vectorized_set_size > 0 {
+        let values = [value; ELEMENTS_PER_VECTOR];
+
+        asm!(
+            r#"
+                vmovups ymm0, [rsi]
+            2:
+                vmovups [rdi], ymm0
+                add rdi, 32
+                sub rcx, 32
+                jnz 2b
+            "#,
+            inout("rsi") values.as_ptr()         => _,
+            inout("rdi") target                  => _,
+            inout("rcx") vectorized_set_size * 4 => _,
+            out("ymm0") _,
+        );
+    }
+
+    let left_to_set = size - vectorized_set_size;
+    if  left_to_set > 0 {
+        let start_index = vectorized_set_size;
+        for index in 0..left_to_set {
+            let index = start_index + index;
+
+            *target.add(index) = value;
         }
     }
 }
@@ -643,10 +768,9 @@ struct LineSplit {
 }
 
 impl LineSplit {
-    fn new(width: usize) -> Self {
-        let part_count = 8;
-        let part_size  = width / part_count;
-        let last_add   = width - (part_count * part_size);
+    fn new(width: usize, part_count: usize) -> Self {
+        let part_size = width / part_count;
+        let last_add  = width - (part_count * part_size);
 
         Self {
             part_count,
