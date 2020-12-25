@@ -21,6 +21,7 @@ global enter_kernel
 ; qword [rsp + 0x30] - Physical region base
 ; qword [rsp + 0x38] - Uninitialized GDT
 ; qword [rsp + 0x40] - Trampoline RSP
+; qword [rsp + 0x48] - Boot TSC
 enter_kernel:
     ; Move all register arguments to shadow space on the stack.
     mov [rsp + 0x8],  rcx
@@ -44,6 +45,7 @@ enter_kernel:
     copy_argument 0x30
     copy_argument 0x38
     copy_argument 0x40
+    copy_argument 0x48
 
     ; Get uninitialized GDT base.
     mov r10, [rsp + 0x38]
@@ -164,9 +166,9 @@ enter_kernel:
     jmp rax
 
 .entry_64_next:
-    ; In System-V ABI RDI is the first parameter to the function.
-    ; Load boot block to RDI so it will be passed to the kernel entrypoint.
+    ; Load kernel arguments.
     mov rdi, qword [rsp + 0x18]
+    mov rsi, qword [rsp + 0x48]
 
     ; Get the entrypoint of the kernel.
     mov rdx, qword [rsp + 0x08]

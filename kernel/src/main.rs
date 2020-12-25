@@ -21,7 +21,7 @@ mod interrupts_misc;
 use page_table::PhysAddr;
 
 #[no_mangle]
-extern "C" fn _start(boot_block: PhysAddr) -> ! {
+extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
     // Make sure that LLVM data layout isn't broken.
     assert!(core::mem::size_of::<u64>() == 8 && core::mem::align_of::<u64>() == 8,
             "U64 has invalid size/alignment.");
@@ -31,7 +31,7 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         cpu::zero_idt();
 
         // Initialize crucial kernel per-core components.
-        core_locals::initialize(boot_block);
+        core_locals::initialize(boot_block, boot_tsc);
 
         if core!().id == 0 {
             // Initialize framebuffer early so we can show logs on the screen.
@@ -67,9 +67,9 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         asm!("mov ax, ds", out("ax") ds);
     }
 
-    color_println!(0x00ffff, "Core initialized in {}s. Core ID: {}. APIC ID {:?}. \
-                   CS 0x{:x}, DS 0x{:x}. Using {:?}.", time::local_uptime(), core!().id,
-                   core!().apic_id(), cs, ds, core!().apic_mode());
+    color_println!(0x00ffff, "Core initialized in {:.2}ms. Core ID: {}. APIC ID {:?}. \
+                   CS 0x{:x}, DS 0x{:x}. Using {:?}.", time::local_uptime() * 1000.0,
+                   core!().id, core!().apic_id(), cs, ds, core!().apic_mode());
 
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");

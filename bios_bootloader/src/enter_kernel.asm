@@ -10,6 +10,7 @@ global enter_kernel
 ; dword [esp + 0x1c] - Kernel CR3
 ; dword [esp + 0x20] - Trampoline CR3
 ; qword [esp + 0x24] - Physical region base
+; qword [esp + 0x2c] - Boot TSC
 enter_kernel:
     ; Load 64 bit GDT.
     lgdt [gdt_64.r]
@@ -77,9 +78,9 @@ enter_kernel:
     jmp rax
 
 .entry_64_next:
-    ; In System-V ABI RDI is the first parameter to the function.
-    ; Load boot block to RDI so it will be passed to the kernel entrypoint.
+    ; Load kernel arguments.
     mov rdi, qword [rsp + 0x14]
+    mov rsi, qword [rsp + 0x2c]
 
     ; Get the entrypoint of the kernel.
     mov rdx, qword [rsp + 0x04]

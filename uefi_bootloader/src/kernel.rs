@@ -304,7 +304,7 @@ fn load_kernel() -> KernelEntryData {
     entry_data
 }
 
-pub unsafe fn enter() -> ! {
+pub unsafe fn enter(boot_tsc: u64) -> ! {
     let entry_data: Option<KernelEntryData> = *KERNEL_ENTRY_DATA.lock();
     let entry_data = entry_data.unwrap_or_else(|| {
         load_kernel()
@@ -315,11 +315,11 @@ pub unsafe fn enter() -> ! {
     extern "C" {
         fn enter_kernel(entrypoint: u64, rsp: u64, boot_block: u64, kernel_cr3: u64,
                         trampoline_cr3: u64, physical_region: u64, gdt: u64,
-                        trampoline_rsp: u64) -> !;
+                        trampoline_rsp: u64, boot_tsc: u64) -> !;
     }
     
     enter_kernel(entry_data.entrypoint, rsp, &BOOT_BLOCK as *const _ as u64,
                  entry_data.kernel_cr3, entry_data.trampoline_cr3,
                  KERNEL_PHYSICAL_REGION_BASE, entry_data.gdt,
-                 entry_data.trampoline_rsp);
+                 entry_data.trampoline_rsp, boot_tsc);
 }

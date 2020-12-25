@@ -32,6 +32,8 @@ static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 #[no_mangle]
 extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) -> ! {
+    let boot_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+
     if !INITIALIZED.load(Ordering::Relaxed) {
         // We are executing for the first time and we have EFI services available.
 
@@ -71,6 +73,6 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
         // Zero out the IDT so if there is any exception we will triple fault.
         cpu::zero_idt();
 
-        kernel::enter();
+        kernel::enter(boot_tsc);
     }
 }

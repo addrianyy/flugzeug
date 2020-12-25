@@ -106,7 +106,7 @@ impl CoreLocals {
 trait SyncGuard: Sync + Sized {}
 impl SyncGuard for CoreLocals {}
 
-pub unsafe fn initialize(boot_block: PhysAddr) {
+pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
     const IA32_GS_BASE: u32 = 0xc0000101;
 
     // Make sure that core locals haven't been initialized yet.
@@ -138,9 +138,9 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
     };
 
     let core_locals = CoreLocals {
+        boot_tsc,
         self_address: core_locals_ptr,
         xsave_area:   0,
-        boot_tsc:     0,
         id:           core_id,
         apic:         Lock::new(None),
         apic_id:      AtomicU32::new(!0),

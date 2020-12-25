@@ -419,6 +419,8 @@ unsafe fn locate_acpi() {
 #[no_mangle]
 extern "C" fn _start(boot_disk_data: &BootDiskData,
                      boot_disk_descriptor: &BootDiskDescriptor) -> ! {
+    let boot_tsc = unsafe { core::arch::x86::_rdtsc() };
+
     // Zero out the IDT so if there is any exception we will triple fault.
     unsafe {
         cpu::zero_idt();
@@ -456,13 +458,13 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
 
     extern "C" {
         fn enter_kernel(entrypoint: u64, rsp: u64, boot_block: u64, kernel_cr3: u32,
-                        trampoline_cr3: u32, physical_region: u64) -> !;
+                        trampoline_cr3: u32, physical_region: u64, boot_tsc: u64) -> !;
     }
 
     // Enter the 64 bit kernel!
     unsafe {
         enter_kernel(entry_data.entrypoint, rsp, &BOOT_BLOCK as *const _ as u64,
                      entry_data.kernel_cr3, entry_data.trampoline_cr3,
-                     KERNEL_PHYSICAL_REGION_BASE);
+                     KERNEL_PHYSICAL_REGION_BASE, boot_tsc);
     }
 }

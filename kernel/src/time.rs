@@ -19,7 +19,7 @@ pub fn get() -> u64 {
 
 #[allow(unused)]
 pub fn time_difference(from: u64, to: u64) -> f64 {
-    assert!(to > from, "`to` is earlier than `from`.");
+    assert!(to > from, "`to` ({}) is earlier than `from` ({}).", to, from);
 
     let khz   = TSC_KHZ.load(Ordering::Relaxed);
     let delta = to - from;
