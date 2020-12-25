@@ -8,15 +8,17 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 #[repr(C)]
 pub struct Lock<T: ?Sized> {
-    locked: AtomicBool,
-    value:  UnsafeCell<T>,
+    locked:  AtomicBool,
+    blocked: AtomicBool,
+    value:   UnsafeCell<T>,
 }
 
 impl<T> Lock<T> {
     pub const fn new(value: T) -> Self {
         Lock {
-            value:  UnsafeCell::new(value),
-            locked: AtomicBool::new(false),
+            value:   UnsafeCell::new(value),
+            locked:  AtomicBool::new(false),
+            blocked: AtomicBool::new(false),
         }
     }
 }
@@ -54,6 +56,24 @@ impl<T: ?Sized> Lock<T> {
             None
         }
     }
+
+    #[inline(always)]
+    pub unsafe fn steal_and_block(&self) -> LockGuard<T> {
+        // Set the lock state to blocked so it will never be unlocked. As someone may
+        // have unlocked this lock before we set `blocked` we also set `locked`.
+        self.blocked.store(true, Ordering::Relaxed);
+        self.locked.store(true, Ordering::Release);
+
+        LockGuard {
+            lock:  self,
+            value: &mut *self.value.get(),
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn bypass(&self) -> *mut T {
+        self.value.get()
+    }
 }
 
 pub struct LockGuard<'a, T: ?Sized> {
@@ -63,7 +83,10 @@ pub struct LockGuard<'a, T: ?Sized> {
 
 impl<'a, T: ?Sized> Drop for LockGuard<'a, T> {
     fn drop(&mut self) {
-        self.lock.locked.store(false, Ordering::Release);
+        // Unlock the lock only if it is not blocked.
+        if !self.lock.blocked.load(Ordering::Relaxed) {
+            self.lock.locked.store(false, Ordering::Release);
+        }
     }
 }
 

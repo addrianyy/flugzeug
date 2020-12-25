@@ -1,7 +1,9 @@
+use core::fmt::Write;
 use core::alloc::{GlobalAlloc, Layout};
 use alloc::{vec, vec::Vec, boxed::Box};
 
 use crate::mm;
+use crate::panic::EmergencyWriter;
 
 pub struct Interrupts {
     _idt: Box<[IdtGate]>,
@@ -178,12 +180,109 @@ pub unsafe fn initialize() {
     });
 }
 
-#[no_mangle]
-unsafe extern "C" fn handle_interrupt(int: u8, frame: &mut InterruptFrame, _error: u64,
-                                      regs: &mut RegisterState) {
-    println!("Unexpected interrupt {}.", int);
-    println!("Interrupt frame: {:#x?}", frame);
-    println!("Register state: {:#x?}", regs);
+fn dump_page_fault(writer: &mut EmergencyWriter, frame: &InterruptFrame, error: u64) {
+    let faulty_address: u64;
 
-    panic!("Unhandled kernel exception.");
+    unsafe {
+        asm!("mov rax, cr2", out("rax") faulty_address);
+    }
+
+    let p    = error & (1 << 0) != 0;
+    let wr   = error & (1 << 1) != 0;
+    let rsvd = error & (1 << 3) != 0;
+    let id   = error & (1 << 4) != 0;
+
+    let action = if id {
+        "execute"
+    } else if wr {
+        "write"
+    } else {
+        "read"
+    };
+
+    let reason = if !p {
+        "Page was not present."
+    } else if rsvd {
+        "Reverved bit was set in one of the page table entries."
+    } else if wr {
+        "Page was not writable."
+    } else if id {
+        "Page was not executable."
+    } else {
+        "Unknown reason for page fault."
+    };
+
+    if id {
+        let _ = writeln!(writer, "Tried to execute invalid memory address \
+                         {:02x}:{:x}. {}", frame.cs, faulty_address, reason);
+    } else {
+        let _  = writeln!(writer, "Instruction at {:02x}:{:x} tried to {} invalid memory \
+                          address {:x}. {}", frame.cs, frame.rip, action, faulty_address, reason);
+    }
+}
+
+unsafe fn dump_interrupt_info(vector: u8, frame: &InterruptFrame, error: u64,
+                              _regs: &RegisterState) {
+    let mut writer = EmergencyWriter::new();
+
+    if vector < 32 {
+        if vector == 14 {
+            // Display more information on page faults.
+            dump_page_fault(&mut writer, frame, error);
+        } else {
+            const EXCEPTION_NAMES: [&str; 21] = [
+                "#DE",
+                "#DB",
+                "NMI",
+                "#BP",
+                "#OF",
+                "#BR",
+                "#UD",
+                "#NM",
+                "#DF",
+                "Coprocessor Segment Overrun",
+                "#TS",
+                "#NP",
+                "#SS",
+                "#GP",
+                "#PF",
+                "Reserved",
+                "#MF",
+                "#AC",
+                "#MC",
+                "#XM",
+                "#VE",
+            ];
+
+            let vector = vector as usize;
+            if  vector < EXCEPTION_NAMES.len() {
+                let _ = writeln!(writer, "Cannot handle {}({:x}) exception at {:02x}:{:x}.",
+                                 EXCEPTION_NAMES[vector], error, frame.cs, frame.rip);
+            } else {
+                let _ = writeln!(writer, "Unknown exception {} with error code {:x} at \
+                                 {:02x}:{:x}.", vector, error, frame.cs, frame.rip);
+            }
+        }
+    } else {
+        let _ = writeln!(writer, "Not recognising hardware IRQ with vector {}.", vector);
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, error: u64,
+                                      regs: &mut RegisterState) {
+    // On kernel panic NMI is sent to all cores on the system to halt execution.
+    if vector == 2 && crate::panic::is_panicking() {
+        cpu::halt();
+    }
+
+    dump_interrupt_info(vector, frame, error, regs);
+
+    let core = core!().id;
+
+    if vector < 32 {
+        panic!("Unexpected kernel exception on CPU {}.", core);
+    } else {
+        panic!("Unexpected kernel interrupt on CPU {}.", core);
+    }
 }
