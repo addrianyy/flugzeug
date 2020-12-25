@@ -8,8 +8,10 @@ use core::alloc::Layout;
 pub const PAGE_PRESENT:         u64 = 1 << 0;
 pub const PAGE_WRITE:           u64 = 1 << 1;
 pub const PAGE_USER:            u64 = 1 << 2;
+pub const PAGE_PWT:             u64 = 1 << 3;
 pub const PAGE_CACHE_DISABLE:   u64 = 1 << 4;
 pub const PAGE_SIZE:            u64 = 1 << 7;
+pub const PAGE_PAT:             u64 = 1 << 7;
 pub const PAGE_NX:              u64 = 1 << 63;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]

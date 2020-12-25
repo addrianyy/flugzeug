@@ -1,4 +1,4 @@
-use page_table::PhysAddr;
+use page_table::{PhysAddr, PAGE_CACHE_DISABLE};
 
 pub struct Hpet {
     registers:    &'static mut [u64],
@@ -114,7 +114,7 @@ impl Hpet {
 
     pub unsafe fn new(hpet_base: PhysAddr) -> Self {
         // Map HPET to the non-cacheable memory.
-        let virt_addr = crate::mm::map_mmio(hpet_base, 4096, false);
+        let virt_addr = crate::mm::map_mmio(hpet_base, 4096, PAGE_CACHE_DISABLE);
 
         // The timer register space is 1024 bytes. The registers are generally aligned on 64-bit
         // boundaries to simplify implementation with IA64 processors.

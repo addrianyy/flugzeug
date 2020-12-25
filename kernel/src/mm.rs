@@ -2,7 +2,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
-                 PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE};
+                 PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE, PAGE_PAT, PAGE_PWT};
 use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
                  KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING};
 
@@ -113,7 +113,7 @@ pub fn reserve_virt_addr(size: usize) -> VirtAddr {
     VirtAddr(address)
 }
 
-pub unsafe fn map_mmio(phys_addr: PhysAddr, size: u64, cache_enable: bool) -> VirtAddr {
+pub unsafe fn map_mmio(phys_addr: PhysAddr, size: u64, flags: u64) -> VirtAddr {
     assert!(phys_addr.0 & 0xfff == 0, "MMIO base {:x} is not page aligned.", phys_addr.0);
     assert!(size        & 0xfff == 0, "MMIO size {:x} is not page aligned.", size);
 
@@ -126,11 +126,7 @@ pub unsafe fn map_mmio(phys_addr: PhysAddr, size: u64, cache_enable: bool) -> Vi
         let phys_addr = phys_addr.0 + offset;
         let virt_addr = VirtAddr(virt_addr.0 + offset);
 
-        let mut backing = PAGE_PRESENT | PAGE_WRITE | PAGE_NX | phys_addr;
-
-        if !cache_enable {
-            backing |= PAGE_CACHE_DISABLE;
-        }
+        let backing = PAGE_PRESENT | PAGE_WRITE | PAGE_NX | phys_addr | flags;
 
         page_table.map_raw(&mut PhysicalMemory, virt_addr, PageType::Page4K,
                            backing, true, false)
@@ -470,4 +466,39 @@ impl core::fmt::Display for Memory {
 
         write!(f, "{} B", self.0)
     }
+}
+
+pub const PAGE_WB:       u64 = 0;
+pub const PAGE_UNCACHED: u64 = PAGE_CACHE_DISABLE;
+pub const PAGE_WC:       u64 = PAGE_PAT | PAGE_PWT;
+
+pub unsafe fn initialize() {
+    const IA32_PAT: u32 = 0x277;
+
+    let mut pat = cpu::rdmsr(IA32_PAT);
+
+    macro_rules! set_memory_type {
+        ($flags: expr, $type: expr) => {
+            let flags: u64 = $flags;
+            let typ:   u8  = $type;
+
+            let pwt_flag = (flags >> 3) & 1;
+            let pcd_flag = (flags >> 4) & 1;
+            let pat_flag = (flags >> 7) & 1;
+
+            assert!(flags & !PAGE_CACHE_DISABLE & !PAGE_PAT & !PAGE_PWT == 0,
+                    "Invalid page table flags to set PAT.");
+
+            let index = 4 * pat_flag + 2 * pcd_flag + pwt_flag;
+
+            pat &= !(0xff        << (index * 8));
+            pat |=  (typ as u64) << (index * 8);
+        }
+    }
+
+    set_memory_type!(PAGE_WB,       0x06);
+    set_memory_type!(PAGE_UNCACHED, 0x07);
+    set_memory_type!(PAGE_WC,       0x01);
+
+    cpu::wrmsr(IA32_PAT, pat);
 }

@@ -30,8 +30,8 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         // Zero out the IDT so if there is any exception we will triple fault.
         cpu::zero_idt();
 
-        // Initialize crucial kernel per-core components.
         core_locals::initialize(boot_block, boot_tsc);
+        mm::initialize();
 
         if core!().id == 0 {
             // Initialize framebuffer early so we can show logs on the screen.
@@ -68,11 +68,13 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
                        OS took {:.2}s.", time::uptime_with_firmware() - time::global_uptime(),
                        time::global_uptime());
 
+        println!("{:x}", unsafe { cpu::rdmsr(0x277) });
+
         let mut tsc = 0;
 
         for i in 0.. {
             let c = time::get_tsc();
-            color_println!(0xff00ff, "Running {} ({}K)", i, tsc / 1000);
+            color_println!(0xff00ff, "Running {} ({}K) ({}K)", i, tsc / 1000, framebuffer::get_profile() / 1000);
             let d = time::get_tsc() - c;
 
             tsc = d;
