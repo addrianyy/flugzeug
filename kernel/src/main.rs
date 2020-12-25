@@ -11,6 +11,7 @@ mod apic;
 mod acpi;
 mod font;
 mod time;
+mod hpet;
 mod panic;
 mod processors;
 mod interrupts;
@@ -66,14 +67,9 @@ extern "C" fn _start(boot_block: PhysAddr) -> ! {
         asm!("mov ax, ds", out("ax") ds);
     }
 
-    let apic_mode = core!().apic.lock()
-        .as_ref()
-        .unwrap()
-        .mode();
-
-    color_println!(0x00ffff, "Core is now initialized. Core ID: {}. APIC ID {:?}. \
-                   CS 0x{:x}, DS 0x{:x}. Using {:?}.", core!().id, core!().apic_id(),
-                   cs, ds, apic_mode);
+    color_println!(0x00ffff, "Core initialized in {}s. Core ID: {}. APIC ID {:?}. \
+                   CS 0x{:x}, DS 0x{:x}. Using {:?}.", time::local_uptime(), core!().id,
+                   core!().apic_id(), cs, ds, core!().apic_mode());
 
     if core!().id == 0 {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen!");

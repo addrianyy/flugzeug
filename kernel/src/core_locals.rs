@@ -3,10 +3,10 @@ use core::alloc::Layout;
 use core::alloc::GlobalAlloc;
 
 use crate::interrupts::Interrupts;
+use crate::apic::{Apic, ApicMode};
 use crate::mm::{self, FreeList};
 use boot_block::BootBlock;
 use page_table::PhysAddr;
-use crate::apic::Apic;
 use lock::Lock;
 
 static NEXT_FREE_CORE_ID: AtomicU64 = AtomicU64::new(0);
@@ -51,6 +51,8 @@ pub struct CoreLocals {
     /// Interrupt handlers for this core.
     pub interrupts: Lock<Option<Interrupts>>,
 
+    pub boot_tsc: u64,
+
     /// APIC ID for this core. !0 if not cached yet.
     apic_id: AtomicU32,
 
@@ -90,6 +92,13 @@ impl CoreLocals {
             0xffff_ffff => None,
             x           => Some(x),
         }
+    }
+
+    pub fn apic_mode(&self) -> ApicMode {
+        core!().apic.lock()
+            .as_ref()
+            .expect("Cannot get APIC mode before initializing APIC.")
+            .mode()
     }
 }
 
@@ -131,6 +140,7 @@ pub unsafe fn initialize(boot_block: PhysAddr) {
     let core_locals = CoreLocals {
         self_address: core_locals_ptr,
         xsave_area:   0,
+        boot_tsc:     0,
         id:           core_id,
         apic:         Lock::new(None),
         apic_id:      AtomicU32::new(!0),
