@@ -67,6 +67,22 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen! Firmware took {:.2}s, \
                        OS took {:.2}s.", time::uptime_with_firmware() - time::global_uptime(),
                        time::global_uptime());
+
+        unsafe {
+            core::ptr::write_volatile(0x100 as *mut u32, 10);
+        }
+    }
+
+    if core!().id == 1 {
+        let mut t = time::get();
+
+        loop {
+            let n = time::get();
+            if time::time_difference(t, n) > 1.0 {
+                println!("Hello from core 1.");
+                t = n;
+            }
+        }
     }
 
     cpu::halt();

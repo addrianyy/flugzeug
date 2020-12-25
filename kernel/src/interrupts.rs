@@ -3,7 +3,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use alloc::{vec, vec::Vec, boxed::Box};
 
 use crate::mm;
-use crate::panic::EmergencyWriter;
+use crate::panic::{self, EmergencyWriter};
 
 pub struct Interrupts {
     _idt: Box<[IdtGate]>,
@@ -221,14 +221,14 @@ fn dump_page_fault(writer: &mut EmergencyWriter, frame: &InterruptFrame, error: 
     }
 }
 
-unsafe fn dump_interrupt_info(vector: u8, frame: &InterruptFrame, error: u64,
-                              _regs: &RegisterState) {
-    let mut writer = EmergencyWriter::new();
+unsafe fn dump_interrupt_info(writer: &mut EmergencyWriter, vector: u8, frame: &InterruptFrame,
+                              error: u64, _regs: &RegisterState) {
+    let _ = writeln!(writer);
 
     if vector < 32 {
         if vector == 14 {
             // Display more information on page faults.
-            dump_page_fault(&mut writer, frame, error);
+            dump_page_fault(writer, frame, error);
         } else {
             const EXCEPTION_NAMES: [&str; 21] = [
                 "#DE",
@@ -276,13 +276,21 @@ unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, er
         cpu::halt();
     }
 
-    dump_interrupt_info(vector, frame, error, regs);
+    let mut writer = EmergencyWriter::new();
 
-    let core = core!().id;
+    dump_interrupt_info(&mut writer, vector, frame, error, regs);
 
-    if vector < 32 {
-        panic!("Unexpected kernel exception on CPU {}.", core);
+    let name = if vector < 32 {
+        "exception"
     } else {
-        panic!("Unexpected kernel interrupt on CPU {}.", core);
-    }
+        "interrupt"
+    };
+
+    // We print panic information ourselves and don't use panic!() macro.
+    // This is done so we can have ownership of emergency writer all the time.
+    let _ = writeln!(writer, "Kernel panic on CPU {}!", core!().id);
+    let _ = writeln!(writer, "Unexpected kernel {}.", name);
+    let _ = writeln!(writer);
+
+    panic::do_panic(writer, None);
 }

@@ -144,10 +144,14 @@ impl Drop for EmergencyWriter {
     }
 }
 
-unsafe fn dump_panic_info(panic_info: &PanicInfo) {
-    let mut writer = EmergencyWriter::new();
+unsafe fn dump_panic_info(writer: &mut EmergencyWriter, panic_info: &PanicInfo) {
+    let _ = writeln!(writer);
 
-    let _ = writeln!(writer, "Kernel panic!");
+    if has_core_locals() {
+        let _ = writeln!(writer, "Kernel panic on CPU {}!", core!().id);
+    } else {
+        let _ = writeln!(writer, "Kernel panic on unknown CPU!");
+    }
 
     if let Some(message) = panic_info.message() {
         let _ = writeln!(writer, "message: {}", message);
@@ -156,26 +160,27 @@ unsafe fn dump_panic_info(panic_info: &PanicInfo) {
     if let Some(location) = panic_info.location() {
         let _ = writeln!(writer, "location: {}:{}", location.file(), location.line());
     }
+
+    let _ = writeln!(writer);
 }
 
-#[panic_handler]
-fn panic(panic_info: &PanicInfo) -> ! {
-    unsafe {
-        // Make sure to disable interrupts as system is in invalid state.
-        asm!("cli");
+pub unsafe fn do_panic(mut writer: EmergencyWriter, panic_info: Option<&PanicInfo>) -> ! {
+    // Make sure to disable interrupts as system is in possibly invalid state.
+    asm!("cli");
 
+    if let Some(panic_info) = panic_info {
         // Print information about the panic to user.
-        dump_panic_info(panic_info);
+        dump_panic_info(&mut writer, panic_info);
     }
 
+    // Try to get access to the APIC.
     if has_core_locals() {
-        IS_PANICKING.store(true, Ordering::Relaxed);
-
-        // Halt execution of all cores on the system by sending NMI to them.
-        unsafe {
-            let apic = &mut *core!().apic.bypass();
-
-            if let Some(apic) = apic {
+        if let Some(apic) = &mut *core!().apic.bypass() {
+            // Halt execution of all cores on the system by sending NMI to them.
+            // NMI handler will check if we are panicking and if we are then it will
+            // halt the processor. As we don't want to send NMIs multiple time we send them
+            // only if `IS_PANICKING` is false now.
+            if IS_PANICKING.compare_and_swap(false, true, Ordering::Relaxed) == false {
                 for apic_id in 0..processors::MAX_CORES {
                     let apic_id = apic_id as u32;
 
@@ -189,6 +194,9 @@ fn panic(panic_info: &PanicInfo) -> ! {
                         continue;
                     }
 
+                    // Inform that this CPU goes offline.
+                    processors::set_core_state(apic_id, CoreState::None);
+
                     // Request to halt execution via NMI.
                     apic.ipi(apic_id, (1 << 14) | (4 << 8));
                 }
@@ -196,5 +204,15 @@ fn panic(panic_info: &PanicInfo) -> ! {
         }
     }
 
+    // Unlock emergency writer.
+    drop(writer);
+
     cpu::halt();
+}
+
+#[panic_handler]
+fn panic(panic_info: &PanicInfo) -> ! {
+    unsafe {
+        do_panic(EmergencyWriter::new(), Some(panic_info));
+    }
 }

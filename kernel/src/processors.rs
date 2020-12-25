@@ -38,7 +38,7 @@ impl From<u8> for CoreState {
     }
 }
 
-unsafe fn set_core_state(apic_id: u32, state: CoreState) {
+pub unsafe fn set_core_state(apic_id: u32, state: CoreState) {
     CORE_STATES[apic_id as usize].store(state as u8, Ordering::SeqCst);
 }
 
