@@ -75,6 +75,11 @@ pub unsafe fn notify_core_online() {
                 "AP became online but it wasn't in launching state before.");
     }
 
+    // If we were launching we may have missed an NMI. Halt the execution if kernel is panicking.
+    if crate::panic::is_panicking() {
+        cpu::halt();
+    }
+
     // This core is now online.
     CORES_ONLINE.fetch_add(1, Ordering::SeqCst);
 

@@ -68,8 +68,7 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
                        OS took {:.2}s.", time::uptime_with_firmware() - time::global_uptime(),
                        time::global_uptime());
 
-        println!("{:x}", unsafe { cpu::rdmsr(0x277) });
-
+        /*
         let mut tsc = 0;
 
         for i in 0.. {
@@ -79,6 +78,7 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
 
             tsc = d;
         }
+        */
     }
 
     cpu::halt();
