@@ -67,7 +67,6 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen! Firmware took {:.2}s, \
                        OS took {:.2}s.", time::uptime_with_firmware() - time::global_uptime(),
                        time::global_uptime());
-
         /*
         let mut tsc = 0;
 

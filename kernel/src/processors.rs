@@ -237,9 +237,9 @@ pub unsafe fn initialize() {
         // Launch the core by sending INIT-SIPI-SIPI sequence to to it. 
         // Bootloader will perform normal initialization sequence on the launched core
         // and transfer execution to the kernel entrypoint.
-        apic.ipi(apic_id, 0x4500);
-        apic.ipi(apic_id, 0x4600 | sipi_vector);
-        apic.ipi(apic_id, 0x4600 | sipi_vector);
+        apic.ipi(apic_id, (1 << 14) | (0b101 << 8));
+        apic.ipi(apic_id, (1 << 14) | (0b110 << 8) | sipi_vector);
+        apic.ipi(apic_id, (1 << 14) | (0b110 << 8) | sipi_vector);
 
         // Wait for the core to become online. Bootloader is not thread safe so there can
         // be only one launching AP at a time.

@@ -198,7 +198,7 @@ pub unsafe fn do_panic(mut writer: EmergencyWriter, panic_info: Option<&PanicInf
                     processors::set_core_state(apic_id, CoreState::None);
 
                     // Request to halt execution via NMI.
-                    apic.ipi(apic_id, (1 << 14) | (4 << 8));
+                    apic.ipi(apic_id, (1 << 14) | (0b100 << 8));
                 }
             }
         }
