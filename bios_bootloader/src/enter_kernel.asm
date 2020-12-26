@@ -12,20 +12,6 @@ global enter_kernel
 ; qword [esp + 0x24] - Physical region base
 ; qword [esp + 0x2c] - Boot TSC
 enter_kernel:
-    ; Load 64 bit GDT.
-    lgdt [gdt_64.r]
-
-    ; Enable LME and NXE.
-    mov ecx, 0xc0000080
-    mov eax, 0x00000900
-    mov edx, 0
-    wrmsr
-
-    ; Load trampoline CR3 which maps first 1MB of memory at address 0 (identity map)
-    ; and at address `Physical region base` (linear map).
-    mov eax, [esp + 0x20]
-    mov cr3, eax
-
     ; Enable some SSE stuff and PAE which is required for long mode.
     xor eax, eax
     or  eax, (1 <<  9) ; OSFXSR
@@ -34,6 +20,17 @@ enter_kernel:
     or  eax, (1 << 18) ; OSXSAVE
     mov cr4, eax
 
+    ; Load trampoline CR3 which maps first 1MB of memory at address 0 (identity map)
+    ; and at address `Physical region base` (linear map).
+    mov eax, [esp + 0x20]
+    mov cr3, eax
+
+    ; Enable LME and NXE.
+    mov ecx, 0xc0000080
+    mov eax, 0x00000900
+    mov edx, 0
+    wrmsr
+
     ; Enable paging, write protect and some other less important stuff.
     xor eax, eax
     or  eax,  (1 <<  0) ; Protected mode enable
@@ -41,6 +38,9 @@ enter_kernel:
     or  eax,  (1 << 16) ; Write protect
     or  eax,  (1 << 31) ; Paging enable
     mov cr0, eax
+
+    ; Load 64 bit GDT.
+    lgdt [gdt_64.r]
 
     ; Enable x87, SSE and AVX in XCR0.
     xor eax, eax

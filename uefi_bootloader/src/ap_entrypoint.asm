@@ -89,8 +89,15 @@ entry_32:
     add eax, ebx
     mov dword [ebx + gdt_64.pointer], eax
 
-    ; Load 64 bit GDT.
-    lgdt [ebx + gdt_64.register]
+    ; Enable PAE.
+    mov eax, cr4
+    or  eax, 1 << 5
+    mov cr4, eax
+
+    ; Load page table. It will contain first 4GB of memory and bootloader mapped in.
+    ; Even though `trampoline_cr3` is qword it is guaranteed to be in lower 4GB of memory.
+    mov eax, [ebx + trampoline_cr3]
+    mov cr3, eax
 
     ; Enable long mode.
     mov ecx, 0xC0000080
@@ -98,20 +105,13 @@ entry_32:
     or eax, 1 << 8
     wrmsr
 
-    ; Load page table. It will contain first 4GB of memory and bootloader mapped in.
-    ; Even though `trampoline_cr3` is qword it is guaranteed to be in lower 4GB of memory.
-    mov eax, [ebx + trampoline_cr3]
-    mov cr3, eax
-
-    ; Enable PAE.
-    mov eax, cr4
-    or  eax, 1 << 5
-    mov cr4, eax
-
     ; Enable paging.
     mov eax, cr0
     or  eax, 1 << 31
     mov cr0, eax
+
+    ; Load 64 bit GDT.
+    lgdt [ebx + gdt_64.register]
 
     ; Get absolute address of 64 bit entrypoint.
     mov eax, entry_64

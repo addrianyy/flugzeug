@@ -1,4 +1,4 @@
-use page_table::{PhysAddr, PAGE_CACHE_DISABLE};
+use page_table::PhysAddr;
 use crate::mm;
 
 const IA32_APIC_BASE: u32 = 0x1b;
@@ -140,7 +140,7 @@ pub unsafe fn initialize() {
     cpu::wrmsr(IA32_APIC_BASE, state);
 
     let mut apic = if !x2apic {
-        let virt_addr = mm::map_mmio(PhysAddr(APIC_BASE), 4096, PAGE_CACHE_DISABLE);
+        let virt_addr = mm::map_mmio(PhysAddr(APIC_BASE), 4096, mm::PAGE_UNCACHEABLE);
 
         // Highest APIC register is at address 0x3f0, so whole mapping needs to be 0x400 bytes.
         Apic::XApic(core::slice::from_raw_parts_mut(virt_addr.0 as *mut u32,

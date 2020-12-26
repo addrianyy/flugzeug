@@ -468,9 +468,9 @@ impl core::fmt::Display for Memory {
     }
 }
 
-pub const PAGE_WB:       u64 = 0;
-pub const PAGE_UNCACHED: u64 = PAGE_CACHE_DISABLE;
-pub const PAGE_WC:       u64 = PAGE_PAT | PAGE_PWT;
+pub const PAGE_WB:          u64 = 0;
+pub const PAGE_UNCACHEABLE: u64 = PAGE_CACHE_DISABLE;
+pub const PAGE_WC:          u64 = PAGE_PAT | PAGE_PWT;
 
 pub unsafe fn initialize() {
     const IA32_PAT: u32 = 0x277;
@@ -496,9 +496,9 @@ pub unsafe fn initialize() {
         }
     }
 
-    set_memory_type!(PAGE_WB,       0x06);
-    set_memory_type!(PAGE_UNCACHED, 0x07);
-    set_memory_type!(PAGE_WC,       0x01);
+    set_memory_type!(PAGE_WB,          0x06);
+    set_memory_type!(PAGE_UNCACHEABLE, 0x00);
+    set_memory_type!(PAGE_WC,          0x01);
 
     cpu::wrmsr(IA32_PAT, pat);
 }
