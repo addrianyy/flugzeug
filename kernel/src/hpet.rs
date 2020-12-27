@@ -118,8 +118,11 @@ impl Hpet {
 
         // The timer register space is 1024 bytes. The registers are generally aligned on 64-bit
         // boundaries to simplify implementation with IA64 processors.
-        let registers = core::slice::from_raw_parts_mut(virt_addr.0 as *mut u64,
-                                                        1024 / core::mem::size_of::<u64>());
+        let registers = {
+            #[allow(clippy::size_of_in_element_count)]
+            core::slice::from_raw_parts_mut(virt_addr.0 as *mut u64,
+                                            1024 / core::mem::size_of::<u64>())
+        };
 
         let mut hpet = Self {
             registers,

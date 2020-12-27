@@ -120,7 +120,7 @@ pub unsafe fn initialize() {
 
     // Create the TSS entry for the GDT.
     let tss_high = tss_base >> 32;
-    let tss_low  = 0x8900_00000000 | (((tss_base >> 24) & 0xff) << 56) |
+    let tss_low  = 0x8900_0000_0000 | (((tss_base >> 24) & 0xff) << 56) |
         ((tss_base & 0xffffff) << 16) | tss_limit;
 
     // Add the TSS entry into the GDT.
@@ -154,9 +154,10 @@ pub unsafe fn initialize() {
             _ => 0,
         };
 
+        let address = crate::interrupts_misc::INTERRUPT_HANDLERS[int] as usize as u64;
+
         // Add an interrupt gate that will preprocess interrupt and jump to the `handle_interrupt`.
-        idt.push(IdtGate::new(true, 0x08, crate::interrupts_misc::INTERRUPT_HANDLERS[int] as u64,
-                              0xe, 0, ist));
+        idt.push(IdtGate::new(true, 0x08, address, 0xe, 0, ist));
     }
 
     // Make sure that the IDT won't get relocated.

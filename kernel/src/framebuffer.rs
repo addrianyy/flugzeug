@@ -155,6 +155,7 @@ impl Font {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw(&self, ch: u8, x: usize, y: usize, foreground: u32, background: u32,
             line_buffer: &mut [u32], framebuffer: &mut Framebuffer) {
         let index     = (ch as usize) * self.height;
@@ -482,8 +483,7 @@ pub unsafe fn initialize() {
     assert!(kernel_framebuffer.is_none(), "Framebuffer was already initialized.");
 
     // Get framebuffer information from the bootloader.
-    let framebuffer_info: Option<FramebufferInfo> =
-        core!().boot_block.framebuffer.lock().clone();
+    let framebuffer_info: Option<FramebufferInfo> = *core!().boot_block.framebuffer.lock();
 
     if let Some(framebuffer_info) = framebuffer_info {
         let framebuffer = TextFramebuffer::new(Framebuffer::new(&framebuffer_info));

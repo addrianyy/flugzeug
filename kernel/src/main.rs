@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(panic_info_message, alloc_error_handler, asm, const_in_array_repeat_expressions)]
+#![allow(clippy::identity_op, clippy::missing_safety_doc)]
 
 extern crate alloc;
 

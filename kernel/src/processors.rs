@@ -173,7 +173,7 @@ pub unsafe fn initialize() {
     });
 
     let current_apic_id            = core!().apic_id().unwrap();
-    let ap_entrypoint: Option<u64> = core!().boot_block.ap_entrypoint.lock().clone();
+    let ap_entrypoint: Option<u64> = *core!().boot_block.ap_entrypoint.lock();
 
     if let Some(ap_entrypoint) = ap_entrypoint {
         if let Some(apics) = &apics {

@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::identity_op, clippy::missing_safety_doc)]
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 
@@ -119,6 +120,7 @@ impl PageTable {
 
     /// Map region at `virt_addr` with size `size`. `init` function is used to initialize
     /// memory contents of the new region.
+    #[allow(clippy::too_many_arguments)]
     pub fn map_init(
         &mut self,
         phys_mem:  &mut impl PhysMem,

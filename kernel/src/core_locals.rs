@@ -241,7 +241,7 @@ unsafe fn initialize_xsave() {
         .expect("Failed to create XSAVE layout.");
     let xsave_area   = mm::GLOBAL_ALLOCATOR.alloc(xsave_layout);
 
-    assert!(xsave_area != core::ptr::null_mut(), "Failed to allocate XSAVE area.");
+    assert!(!xsave_area.is_null(), "Failed to allocate XSAVE area.");
 
     // Zero out XSAVE area as required by the architecture.
     core::ptr::write_bytes(xsave_area, 0, xsave_size);

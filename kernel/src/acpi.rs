@@ -5,9 +5,12 @@ use crate::mm;
 use acpi::Header;
 use page_table::PhysAddr;
 
+pub type TableSignature = [u8; 4];
+pub type TablePayload   = (PhysAddr, usize);
+
 // We don't use lock here as we will initialize this before launching APs and never modify it
 // again.
-static mut ACPI_TABLES: Option<BTreeMap<[u8; 4], Vec<(PhysAddr, usize)>>> = None;
+static mut ACPI_TABLES: Option<BTreeMap<TableSignature, Vec<TablePayload>>> = None;
 
 enum SdtType {
     Rsdt,
@@ -149,7 +152,7 @@ pub unsafe fn initialize() {
 
     let tables = {
         // Get the addreses of ACPI system tables.
-        let system_tables = core!().boot_block.acpi_tables.lock().clone();
+        let system_tables = *core!().boot_block.acpi_tables.lock();
 
         // Get the preferred ACPI system table.
         let (sdt_addr, sdt_type) = match (system_tables.rsdt, system_tables.xsdt) {

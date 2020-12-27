@@ -98,9 +98,12 @@ impl Apic {
 }
 
 pub unsafe fn initialize() {
-    // Make sure the APIC base address is valid.
-    assert!(APIC_BASE > 0 && APIC_BASE == (APIC_BASE & 0xf_ffff_f000),
-            "APIC base address is invalid.");
+    #[allow(clippy::assertions_on_constants)]
+    {
+        // Make sure the APIC base address is valid.
+        assert!(APIC_BASE > 0 && APIC_BASE == (APIC_BASE & 0xf_ffff_f000),
+                "APIC base address is invalid.");
+    }
 
     // Make sure that the APIC hasn't been initialized yet.
     assert!(core!().apic.lock().is_none(), "APIC was already initialized.");
@@ -136,9 +139,12 @@ pub unsafe fn initialize() {
     let mut apic = if !x2apic {
         let virt_addr = mm::map_mmio(PhysAddr(APIC_BASE), 4096, mm::PAGE_UNCACHEABLE);
 
-        // Highest APIC register is at address 0x3f0, so whole mapping needs to be 0x400 bytes.
-        Apic::XApic(core::slice::from_raw_parts_mut(virt_addr.0 as *mut u32,
-                                                    0x400 / core::mem::size_of::<u32>()))
+        #[allow(clippy::size_of_in_element_count)]
+        {
+            // Highest APIC register is at address 0x3f0, so whole mapping needs to be 0x400 bytes.
+            Apic::XApic(core::slice::from_raw_parts_mut(virt_addr.0 as *mut u32,
+                                                        0x400 / core::mem::size_of::<u32>()))
+        }
     } else {
         Apic::X2Apic
     };

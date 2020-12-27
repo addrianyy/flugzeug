@@ -29,7 +29,7 @@ fn has_core_locals() -> bool {
     gs_base != 0
 }
 
-unsafe fn force_acquire_lock<'a, T>(lock: &'a Lock<T>) -> LockGuard<'a, T> {
+unsafe fn force_acquire_lock<T>(lock: &Lock<T>) -> LockGuard<'_, T> {
     // Try geting the lock normally for a few milliseconds.
     let wait_microseconds = 400_000;
     let wait_cycles       = ASSUMED_CPU_FREQUENCY_MHZ * wait_microseconds;
