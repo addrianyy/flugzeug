@@ -68,16 +68,17 @@ pub unsafe fn notify_core_online() {
 
     // Transition the core from the launched state to the online state.
     let old_state = CORE_STATES[apic_id as usize]
-        .compare_and_swap(CoreState::Launched as u8,
+        .compare_exchange(CoreState::Launched as u8,
                           CoreState::Online   as u8,
+                          Ordering::SeqCst,
                           Ordering::SeqCst);
 
     if core!().id == 0 {
         // BSP should be already marked as online (in acpi::initialize).
-        assert!(old_state == CoreState::Online as u8, "BSP was not marked as online.");
+        assert!(old_state == Err(CoreState::Online as u8), "BSP was not marked as online.");
     } else {
         // Make sure that we have transitioned from the launched state to the online state.
-        assert!(old_state == CoreState::Launched as u8,
+        assert!(old_state == Ok(CoreState::Launched as u8),
                 "AP became online but it wasn't in launching state before.");
     }
 

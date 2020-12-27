@@ -75,8 +75,9 @@ impl EmergencyWriter {
         // reentrancy from the same core to allow nested exception/panic.
         loop {
             // Handle case where emergency writer is unlocked.
-            if EMERGENCY_WRITING_CORE.compare_and_swap(CORE_UNLOCKED, core_id,
-                                                       Ordering::Relaxed) == CORE_UNLOCKED {
+            if EMERGENCY_WRITING_CORE.compare_exchange(CORE_UNLOCKED, core_id,
+                                                       Ordering::Relaxed,
+                                                       Ordering::Relaxed).is_ok() {
                 break;
             }
 
@@ -91,9 +92,10 @@ impl EmergencyWriter {
             if locked_id != CORE_UNKNOWN && locked_id != CORE_UNLOCKED &&
                processors::core_state(locked_id as u32) == CoreState::Halted
             {
-                let prev = EMERGENCY_WRITING_CORE.compare_and_swap(locked_id, core_id,
-                                                                   Ordering::Relaxed);
-                if prev == locked_id {
+                let ok = EMERGENCY_WRITING_CORE.compare_exchange(locked_id, core_id,
+                                                                 Ordering::Relaxed,
+                                                                 Ordering::Relaxed).is_ok();
+                if ok {
                     break;
                 }
             }
@@ -186,7 +188,8 @@ unsafe fn begin_panic() -> bool {
 
     if let Some(apic) = &mut *core!().apic.bypass() {
         // Set `IS_PANICKING` and make sure that we are panicking only once.
-        if IS_PANICKING.compare_and_swap(false, true, Ordering::Relaxed) {
+        if IS_PANICKING.compare_exchange(false, true, Ordering::Relaxed,
+                                         Ordering::Relaxed).is_err() {
             return false;
         }
 
