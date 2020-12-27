@@ -1,9 +1,7 @@
-use core::fmt::Write;
 use core::alloc::{GlobalAlloc, Layout};
 use alloc::{vec, vec::Vec, boxed::Box};
 
-use crate::mm;
-use crate::panic::{self, EmergencyWriter};
+use crate::{mm, panic};
 
 pub struct Interrupts {
     _idt: Box<[IdtGate]>,
@@ -173,6 +171,9 @@ pub unsafe fn initialize() {
     // Load new IDT.
     asm!("lidt [{}]", in(reg) &idtr);
 
+    // Reenable NMIs.
+    cpu::outb(0x70, cpu::inb(0x70) & 0x7f);
+
     *interrupts = Some(Interrupts {
         _idt: idt,
         _gdt: gdt,
@@ -180,7 +181,7 @@ pub unsafe fn initialize() {
     });
 }
 
-fn dump_page_fault(writer: &mut EmergencyWriter, frame: &InterruptFrame, error: u64) {
+fn panic_on_page_fault(frame: &InterruptFrame, error: u64) -> ! {
     let faulty_address: u64;
 
     unsafe {
@@ -213,22 +214,18 @@ fn dump_page_fault(writer: &mut EmergencyWriter, frame: &InterruptFrame, error: 
     };
 
     if id {
-        let _ = writeln!(writer, "Tried to execute invalid memory address \
-                         {:02x}:{:x}. {}", frame.cs, faulty_address, reason);
+        panic!("Tried to execute invalid memory address {:02x}:{:x}. {}",
+               frame.cs, faulty_address, reason);
     } else {
-        let _  = writeln!(writer, "Instruction at {:02x}:{:x} tried to {} invalid memory \
-                          address {:x}. {}", frame.cs, frame.rip, action, faulty_address, reason);
+        panic!("Instruction at {:02x}:{:x} tried to {} invalid memory address {:x}. {}",
+               frame.cs, frame.rip, action, faulty_address, reason);
     }
 }
 
-unsafe fn dump_interrupt_info(writer: &mut EmergencyWriter, vector: u8, frame: &InterruptFrame,
-                              error: u64, _regs: &RegisterState) {
-    let _ = writeln!(writer);
-
+fn panic_on_interrupt(vector: u8, frame: &InterruptFrame, error: u64, _regs: &RegisterState) -> ! {
     if vector < 32 {
         if vector == 14 {
-            // Display more information on page faults.
-            dump_page_fault(writer, frame, error);
+            panic_on_page_fault(frame, error);
         } else {
             const EXCEPTION_NAMES: [&str; 21] = [
                 "#DE",
@@ -256,15 +253,15 @@ unsafe fn dump_interrupt_info(writer: &mut EmergencyWriter, vector: u8, frame: &
 
             let vector = vector as usize;
             if  vector < EXCEPTION_NAMES.len() {
-                let _ = writeln!(writer, "Cannot handle {}({:x}) exception at {:02x}:{:x}.",
-                                 EXCEPTION_NAMES[vector], error, frame.cs, frame.rip);
+                panic!("Cannot handle {}({:x}) exception at {:02x}:{:x}.",
+                       EXCEPTION_NAMES[vector], error, frame.cs, frame.rip);
             } else {
-                let _ = writeln!(writer, "Unknown exception {} with error code {:x} at \
-                                 {:02x}:{:x}.", vector, error, frame.cs, frame.rip);
+                panic!("Unknown exception {} with error code {:x} at {:02x}:{:x}.",
+                       vector, error, frame.cs, frame.rip);
             }
         }
     } else {
-        let _ = writeln!(writer, "Not recognising hardware IRQ with vector {}.", vector);
+        panic!("Not recognising hardware IRQ with vector {}.", vector);
     }
 }
 
@@ -272,25 +269,9 @@ unsafe fn dump_interrupt_info(writer: &mut EmergencyWriter, vector: u8, frame: &
 unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, error: u64,
                                       regs: &mut RegisterState) {
     // On kernel panic NMI is sent to all cores on the system to halt execution.
-    if vector == 2 && crate::panic::is_panicking() {
-        cpu::halt();
+    if vector == 2 && panic::is_panicking() {
+        panic::halt();
     }
 
-    let mut writer = EmergencyWriter::new();
-
-    dump_interrupt_info(&mut writer, vector, frame, error, regs);
-
-    let name = if vector < 32 {
-        "exception"
-    } else {
-        "interrupt"
-    };
-
-    // We print panic information ourselves and don't use panic!() macro.
-    // This is done so we can have ownership of emergency writer all the time.
-    let _ = writeln!(writer, "Kernel panic on CPU {}!", core!().id);
-    let _ = writeln!(writer, "Unexpected kernel {}.", name);
-    let _ = writeln!(writer);
-
-    panic::do_panic(writer, None);
+    panic_on_interrupt(vector, frame, error, regs);
 }

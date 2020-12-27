@@ -4,6 +4,7 @@ use core::fmt::Write;
 
 use crate::framebuffer::{self, TextFramebuffer};
 use crate::processors::{self, CoreState};
+use crate::time;
 
 use serial_port::SerialPort;
 use lock::{Lock, LockGuard};
@@ -13,6 +14,10 @@ const CORE_UNKNOWN:  u64 = 0xffff_ffff_ffff_fffe;
 
 static EMERGENCY_WRITING_CORE: AtomicU64  = AtomicU64::new(CORE_UNLOCKED);
 static IS_PANICKING:           AtomicBool = AtomicBool::new(false);
+
+/// We assume 3.5GHz processor. We don't need accurate time in panic subsystem so
+/// this assumption is safe.
+const ASSUMED_CPU_FREQUENCY_MHZ: u64 = 3_500;
 
 pub fn is_panicking() -> bool {
     IS_PANICKING.load(Ordering::Relaxed)
@@ -25,17 +30,13 @@ fn has_core_locals() -> bool {
 }
 
 unsafe fn force_acquire_lock<'a, T>(lock: &'a Lock<T>) -> LockGuard<'a, T> {
-    // Try geting the lock normally for a few milliseconds. Time subsystem is possibly not
-    // initialized so we assume 3.5GHz processor. We don't need accurate time so this
-    // assumption is safe.
+    // Try geting the lock normally for a few milliseconds.
+    let wait_microseconds = 400_000;
+    let wait_cycles       = ASSUMED_CPU_FREQUENCY_MHZ * wait_microseconds;
 
-    let wait_microseconds = 300_000;
-    let tsc_mhz           = 3_500;
-    let wait_cycles       = tsc_mhz * wait_microseconds;
+    let end_tsc = time::get_tsc() + wait_cycles;
 
-    let end_tsc = crate::time::get_tsc() + wait_cycles;
-
-    while crate::time::get_tsc() < end_tsc {
+    while time::get_tsc() < end_tsc {
         if let Some(locked) = lock.try_lock() {
             return locked;
         }
@@ -50,16 +51,21 @@ enum SerialPortWrapper {
     Global(LockGuard<'static, Option<SerialPort>>),
 }
 
-pub struct EmergencyWriter {
+struct EmergencyWriter {
     framebuffer: LockGuard<'static, Option<TextFramebuffer>>,
     serial_port: SerialPortWrapper,
 }
 
 impl EmergencyWriter {
-    pub unsafe fn new() -> Self {
+    unsafe fn new() -> Self {
         let has_core_locals = has_core_locals();
         let core_id         = if has_core_locals {
-            core!().id
+            // If APIC was not initialized we hope that core ID is equal to APIC ID.
+            if let Some(apic_id) = core!().apic_id() {
+                apic_id as u64
+            } else {
+                core!().id
+            }
         } else {
             // There can be only one core at a time with unknown ID.
             CORE_UNKNOWN
@@ -74,9 +80,22 @@ impl EmergencyWriter {
                 break;
             }
 
+            let locked_id = EMERGENCY_WRITING_CORE.load(Ordering::Relaxed);
+
             // Handle case where emergency writer is locked by our current core.
-            if EMERGENCY_WRITING_CORE.load(Ordering::Relaxed) == core_id {
+            if locked_id == core_id {
                 break;
+            }
+
+            // Handle case where emergency writer is locked by halted core.
+            if locked_id != CORE_UNKNOWN && locked_id != CORE_UNLOCKED &&
+               processors::core_state(locked_id as u32) == CoreState::Halted
+            {
+                let prev = EMERGENCY_WRITING_CORE.compare_and_swap(locked_id, core_id,
+                                                                   Ordering::Relaxed);
+                if prev == locked_id {
+                    break;
+                }
             }
 
             core::sync::atomic::spin_loop_hint();
@@ -99,15 +118,6 @@ impl EmergencyWriter {
 
 impl core::fmt::Write for EmergencyWriter {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
-        if let Some(framebuffer) = self.framebuffer.as_mut() {
-            // Use red color for panics.
-            framebuffer.set_color(0xff0000);
-
-            let _ = core::fmt::Write::write_str(framebuffer, string);
-
-            framebuffer.reset_color();
-        }
-
         let serial_port = match &mut self.serial_port {
             SerialPortWrapper::Recreated(port) => port,
             SerialPortWrapper::Global(port)    => {
@@ -131,6 +141,15 @@ impl core::fmt::Write for EmergencyWriter {
 
         let _ = core::fmt::Write::write_str(serial_port, string);
 
+        if let Some(framebuffer) = self.framebuffer.as_mut() {
+            // Use red color for panics.
+            framebuffer.set_color(0xff0000);
+
+            let _ = core::fmt::Write::write_str(framebuffer, string);
+
+            framebuffer.reset_color();
+        }
+
         Ok(())
     }
 }
@@ -144,75 +163,102 @@ impl Drop for EmergencyWriter {
     }
 }
 
-unsafe fn dump_panic_info(writer: &mut EmergencyWriter, panic_info: &PanicInfo) {
-    let _ = writeln!(writer);
-
-    if has_core_locals() {
-        let _ = writeln!(writer, "Kernel panic on CPU {}!", core!().id);
-    } else {
-        let _ = writeln!(writer, "Kernel panic on unknown CPU!");
-    }
-
-    if let Some(message) = panic_info.message() {
-        let _ = writeln!(writer, "message: {}", message);
-    }
-
-    if let Some(location) = panic_info.location() {
-        let _ = writeln!(writer, "location: {}:{}", location.file(), location.line());
-    }
-
-    let _ = writeln!(writer);
-}
-
-pub unsafe fn do_panic(mut writer: EmergencyWriter, panic_info: Option<&PanicInfo>) -> ! {
-    // Make sure to disable interrupts as system is in possibly invalid state.
+pub unsafe fn halt() -> ! {
+    // Make sure that nobody will interrupt us before we halt.
     asm!("cli");
 
-    if let Some(panic_info) = panic_info {
-        // Print information about the panic to user.
-        dump_panic_info(&mut writer, panic_info);
-    }
-
-    // Try to get access to the APIC.
     if has_core_locals() {
-        if let Some(apic) = &mut *core!().apic.bypass() {
-            // Halt execution of all cores on the system by sending NMI to them.
-            // NMI handler will check if we are panicking and if we are then it will
-            // halt the processor. As we don't want to send NMIs multiple time we send them
-            // only if `IS_PANICKING` is false now.
-            if IS_PANICKING.compare_and_swap(false, true, Ordering::Relaxed) == false {
-                for apic_id in 0..processors::MAX_CORES {
-                    let apic_id = apic_id as u32;
-
-                    // Skip this core.
-                    if Some(apic_id) == core!().apic_id() {
-                        continue;
-                    }
-
-                    // Skip non-launched cores.
-                    if processors::core_state(apic_id) != CoreState::Online {
-                        continue;
-                    }
-
-                    // Inform that this CPU goes offline.
-                    processors::set_core_state(apic_id, CoreState::None);
-
-                    // Request to halt execution via NMI.
-                    apic.ipi(apic_id, (1 << 14) | (0b100 << 8));
-                }
-            }
+        if let Some(apic_id) = core!().apic_id() {
+            processors::set_core_state(apic_id, CoreState::Halted);
         }
     }
 
-    // Unlock emergency writer.
-    drop(writer);
-
     cpu::halt();
+}
+
+unsafe fn begin_panic() -> bool {
+    // Make sure to disable interrupts as system is in possibly invalid state.
+    asm!("cli");
+
+    if !has_core_locals() {
+        return true;
+    }
+
+    if let Some(apic) = &mut *core!().apic.bypass() {
+        // Set `IS_PANICKING` and make sure that we are panicking only once.
+        if IS_PANICKING.compare_and_swap(false, true, Ordering::Relaxed) {
+            return false;
+        }
+
+        // Halt execution of all cores on the system by sending NMI to them.
+        // NMI handler will check if we are panicking and if we are then it will
+        // halt the processor.
+        for apic_id in 0..processors::MAX_CORES {
+            let apic_id = apic_id as u32;
+
+            // Skip this core.
+            if Some(apic_id) == core!().apic_id() {
+                continue;
+            }
+
+            // Skip non-launched cores.
+            if processors::core_state(apic_id) != CoreState::Online {
+                continue;
+            }
+
+            // Request to halt execution via NMI.
+            apic.ipi(apic_id, (1 << 14) | (0b100 << 8));
+
+            {
+                // Wait for the CPU to become halted.
+                let wait_microseconds = 150_000;
+                let wait_cycles       = ASSUMED_CPU_FREQUENCY_MHZ * wait_microseconds;
+
+                let end_tsc = time::get_tsc() + wait_cycles;
+
+                while time::get_tsc() < end_tsc {
+                    if processors::core_state(apic_id) == CoreState::Halted {
+                        break;
+                    }
+                }
+
+                // Timeout, we hope that this procesor will get halted soon.
+            }
+
+            processors::set_core_state(apic_id, CoreState::Halted);
+        }
+    }
+
+    true
+}
+
+fn dump_panic_info(writer: &mut EmergencyWriter, panic_info: &PanicInfo) {
+    let _ = writeln!(writer);
+
+    if has_core_locals() {
+        let _ = write!(writer, "Kernel panic on CPU {}", core!().id);
+    } else {
+        let _ = write!(writer, "Kernel panic on unknown CPU");
+    }
+
+    if let Some(location) = panic_info.location() {
+        let _ = writeln!(writer, " ({}:{})!", location.file(), location.line());
+    } else {
+        let _ = writeln!(writer, "!");
+    }
+
+    if let Some(message) = panic_info.message() {
+        let _ = writeln!(writer, "{}", message);
+    }
 }
 
 #[panic_handler]
 fn panic(panic_info: &PanicInfo) -> ! {
     unsafe {
-        do_panic(EmergencyWriter::new(), Some(panic_info));
+        if begin_panic() {
+            dump_panic_info(&mut EmergencyWriter::new(), panic_info);
+        }
+
+        halt();
     }
 }

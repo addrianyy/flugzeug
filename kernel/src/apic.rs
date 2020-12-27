@@ -118,14 +118,8 @@ pub unsafe fn initialize() {
     // We can't reenable APIC if it was disabled by the BIOS.
     assert!(state & (1 << 11) != 0, "APIC was disabled by the BIOS.");
 
-    // Mask off current APIC base.
-    let state = state & !0xf_ffff_f000;
-
     // Set the new APIC base.
-    let state = state | APIC_BASE;
-
-    // Enable the xAPIC mode.
-    let mut state = state | (1 << 11);
+    let mut state = (state & !0xf_ffff_f000) | APIC_BASE;
 
     // If the CPU supports x2APIC mode then enable it.
     if x2apic {

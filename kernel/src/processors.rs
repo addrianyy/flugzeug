@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use alloc::collections::BTreeSet;
 
 use page_table::PhysAddr;
-use crate::mm;
+use crate::{mm, panic};
 
 /// Maximum number of cores allowed on the system.
 pub const MAX_CORES: usize = 1024;
@@ -24,6 +24,9 @@ pub enum CoreState {
 
     /// This APIC ID does not exist.
     None = 3,
+
+    /// This core is halted forever.
+    Halted = 4,
 }
 
 impl From<u8> for CoreState {
@@ -33,6 +36,7 @@ impl From<u8> for CoreState {
             1 => CoreState::Online,
             2 => CoreState::Launched,
             3 => CoreState::None,
+            4 => CoreState::Halted,
             _ => panic!("Invalid CoreState from `u8`."),
         }
     }
@@ -60,8 +64,10 @@ pub unsafe fn notify_core_online() {
     /// Number of cores which have notified that they are online.
     static CORES_ONLINE: AtomicU32 = AtomicU32::new(0);
 
+    let apic_id = core!().apic_id().unwrap();
+
     // Transition the core from the launched state to the online state.
-    let old_state = CORE_STATES[core!().apic_id().unwrap() as usize]
+    let old_state = CORE_STATES[apic_id as usize]
         .compare_and_swap(CoreState::Launched as u8,
                           CoreState::Online   as u8,
                           Ordering::SeqCst);
@@ -76,8 +82,8 @@ pub unsafe fn notify_core_online() {
     }
 
     // If we were launching we may have missed an NMI. Halt the execution if kernel is panicking.
-    if crate::panic::is_panicking() {
-        cpu::halt();
+    if panic::is_panicking() {
+        panic::halt();
     }
 
     // This core is now online.
