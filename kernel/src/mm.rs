@@ -478,11 +478,9 @@ pub unsafe fn initialize() {
     const IA32_PAT:           u32 = 0x277;
 
     // We assume that BIOS/UEFI setup valid MTRRs and we don't need to modify them. Just
-    // make sure that WC memory type is available, MTRRs are enabled and WB is default
-    // memory type.
+    // make sure that WC memory type is available and MTRRs are enabled.
     assert!(cpu::rdmsr(IA32_MTRRCAP) & (1 << 10) != 0, "WC memory type is not supported.");
     assert!(cpu::rdmsr(IA32_MTRR_DEF_TYPE) & (1 << 11) != 0, "MTRRs are not enabled.");
-    assert!(cpu::rdmsr(IA32_MTRR_DEF_TYPE) & 0xff == 6, "WB memory type is not default.");
 
     let mut pat = cpu::rdmsr(IA32_PAT);
 
