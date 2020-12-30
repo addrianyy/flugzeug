@@ -70,6 +70,12 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
                        OS took {:.2}s.", time::uptime_with_firmware() - time::global_uptime(),
                        time::global_uptime());
 
+        let mut buffer = [0u8; 256];
+
+        if let Some(cpu_name) = cpu::cpuid_identifier(0x8000_0002, 4, &mut buffer) {
+            color_println!(0xff00ff, "Running on {}.", cpu_name);
+        }
+
         unsafe {
             vm::initialize();
         }

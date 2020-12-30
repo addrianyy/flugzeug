@@ -24,6 +24,35 @@ pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
     cpuid
 }
 
+pub fn cpuid_identifier<'a>(start: u32, count: usize, mut buffer: &'a mut [u8])
+    -> Option<&'a str>
+{
+    buffer = &mut buffer[..count * 4 * 4];
+
+    for (index, chunk) in buffer.chunks_mut(4 * 4).enumerate() {
+        let command: u32 = start + index as u32;
+
+        let cpuid  = cpuid(command, 0);
+        let output = [cpuid.eax, cpuid.ebx, cpuid.ecx, cpuid.edx];
+
+        for (chunk, value) in chunk.chunks_mut(4).zip(output.iter()) {
+            chunk.copy_from_slice(&value.to_le_bytes());
+        }
+    }
+
+    let size = buffer.iter().position(|x| *x == 0).unwrap_or(buffer.len());
+    let name = core::str::from_utf8(&buffer[..size]).map(|identifier| {
+        // This is safe as CPUID identifiers are ASCII only.
+        let size = identifier.rfind(|x| !char::is_whitespace(x))
+            .map(|index| index + 1)
+            .unwrap_or(identifier.len());
+
+        &identifier[..size]
+    }).ok();
+
+    name
+}
+
 #[derive(Default, Debug)]
 pub struct CpuFeatures {
     pub fpu:            bool,
@@ -48,6 +77,7 @@ pub struct CpuFeatures {
     pub fma:            bool,
     pub apic:           bool,
     pub vmx:            bool,
+    pub svm:            bool,
     pub lahf:           bool,
     pub lzcnt:          bool,
     pub prefetchw:      bool,
@@ -106,6 +136,7 @@ pub fn get_features() -> CpuFeatures {
         let cpuid = cpuid(0x80000001, 0);
 
         features.lahf      = ((cpuid.ecx >> 0) & 1) == 1;
+        features.svm       = ((cpuid.ecx >> 2) & 1) == 1;
         features.lzcnt     = ((cpuid.ecx >> 5) & 1) == 1;
         features.prefetchw = ((cpuid.ecx >> 8) & 1) == 1;
 
