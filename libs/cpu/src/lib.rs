@@ -202,34 +202,6 @@ pub unsafe fn disable_interrupts() {
     asm!("cli");
 }
 
-pub unsafe fn zero_idt() {
-    #[cfg(target_pointer_width = "32")]
-    {
-        #[repr(C, packed)]
-        struct Descriptor {
-            limit: u16,
-            base:  u32,
-        }
-
-        let idt = Descriptor { limit: 0, base: 0 };
-
-        asm!("lidt [eax]", in("eax") &idt);
-    }
-
-    #[cfg(target_pointer_width = "64")]
-    {
-        #[repr(C, packed)]
-        struct Descriptor {
-            limit: u16,
-            base:  u64,
-        }
-
-        let idt = Descriptor { limit: 0, base: 0 };
-
-        asm!("lidt [rax]", in("rax") &idt);
-    }
-}
-
 pub fn halt() -> ! {
     loop {
         unsafe {
@@ -246,6 +218,12 @@ pub fn halt() -> ! {
 pub struct TableRegister {
     pub limit: u16,
     pub base:  usize,
+}
+
+impl TableRegister {
+    pub fn zero() -> Self {
+        Self::default()
+    }
 }
 
 pub fn get_gdt() -> TableRegister {
@@ -268,14 +246,6 @@ pub fn get_idt() -> TableRegister {
     table
 }
 
-pub unsafe fn set_gdt(table: &TableRegister) {
-    asm!("lgdt [{}]", in(reg) table); 
-}
-
-pub unsafe fn set_idt(table: &TableRegister) {
-    asm!("lidt [{}]", in(reg) table); 
-}
-
 pub fn get_tr() -> u16 {
     let tr: u16;
 
@@ -284,6 +254,14 @@ pub fn get_tr() -> u16 {
     }
 
     tr
+}
+
+pub unsafe fn set_gdt(table: &TableRegister) {
+    asm!("lgdt [{}]", in(reg) table);
+}
+
+pub unsafe fn set_idt(table: &TableRegister) {
+    asm!("lidt [{}]", in(reg) table);
 }
 
 pub unsafe fn set_tr(tr: u16) {

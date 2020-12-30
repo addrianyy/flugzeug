@@ -178,11 +178,7 @@ pub unsafe fn initialize() {
 }
 
 fn panic_on_page_fault(frame: &InterruptFrame, error: u64) -> ! {
-    let faulty_address: u64;
-
-    unsafe {
-        asm!("mov rax, cr2", out("rax") faulty_address);
-    }
+    let faulty_address = cpu::get_cr2();
 
     let p    = error & (1 << 0) != 0;
     let wr   = error & (1 << 1) != 0;

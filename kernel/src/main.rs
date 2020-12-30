@@ -29,7 +29,7 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
 
     unsafe {
         // Zero out the IDT so if there is any exception we will triple fault.
-        cpu::zero_idt();
+        cpu::set_idt(&cpu::TableRegister::zero());
 
         core_locals::initialize(boot_block, boot_tsc);
         mm::initialize();

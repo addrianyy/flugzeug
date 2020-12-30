@@ -71,7 +71,7 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
 
     unsafe {
         // Zero out the IDT so if there is any exception we will triple fault.
-        cpu::zero_idt();
+        cpu::set_idt(&cpu::TableRegister::zero());
 
         kernel::enter(boot_tsc);
     }
