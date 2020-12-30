@@ -1,5 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicU64, Ordering};
+use core::ops::{Deref, DerefMut};
+use core::marker::PhantomData;
 
 use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
                  PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE, PAGE_PAT, PAGE_PWT};
@@ -508,4 +510,91 @@ pub unsafe fn initialize() {
     set_memory_type!(PAGE_WC,          0x01);
 
     cpu::wrmsr(IA32_PAT, pat);
+}
+
+pub unsafe fn virt_to_phys(virt_addr: VirtAddr) -> Option<PhysAddr> {
+    // Don't use page table lock because it is not needed.
+    let page_tables = &*core!()
+        .boot_block
+        .page_table
+        .bypass();
+
+    page_tables
+        .as_ref()
+        .unwrap()
+        .virt_to_phys(&mut PhysicalMemory, virt_addr)
+}
+
+pub struct PhysicalPage<T> {
+    phys_addr: PhysAddr,
+    virt_addr: VirtAddr,
+    _phantom:  PhantomData<T>,
+}
+
+impl<T> PhysicalPage<T> {
+    pub fn new(value: T) -> Self {
+        // Verify that `PhysicalPage` constraints are met.
+        assert!(core::mem::size_of::<T>() > 0, "`PhsycialPage` doesn't support zero sized types.");
+        assert!(core::mem::size_of::<T>() <= 4096, "`PhysicalPage` can hold 4096 bytes at most.");
+        assert!(core::mem::align_of::<T>() <= 4096, "`PhysicalPage` can hold 4096 byte \
+                aligned values at most.");
+
+        unsafe {
+            // Allocate object in virtual heap and get its physical address.
+            // Use 4K size and 4K alignment to allocate only one page. More pages won't be
+            // physically contigious.
+            let virt_addr = VirtAddr(
+                GLOBAL_ALLOCATOR.alloc(Layout::from_size_align(4096, 4096).unwrap()) as u64
+            );
+            let phys_addr = virt_to_phys(virt_addr).expect("Failed to translate allocated virtual \
+                                                           address to physical address.");
+
+            // Make sure that we got a valid, 4K aligned physical address.
+            assert!(phys_addr.0 & 0xfff == 0, "Unaligned physical address.");
+
+            // Move `value` to the newly allocated memory.
+            core::ptr::write(virt_addr.0 as *mut T, value);
+
+            Self {
+                phys_addr,
+                virt_addr,
+                _phantom: PhantomData,
+            }
+        }
+    }
+
+    pub fn phys_addr(&self) -> PhysAddr {
+        self.phys_addr
+    }
+}
+
+impl<T> Deref for PhysicalPage<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            &*(self.virt_addr.0 as *const T)
+        }
+    }
+}
+
+impl<T> DerefMut for PhysicalPage<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            &mut *(self.virt_addr.0 as *mut T)
+        }
+    }
+}
+
+impl<T> Drop for PhysicalPage<T> {
+    fn drop(&mut self) {
+        unsafe {
+            // Destroy object in physical page.
+            core::ptr::drop_in_place(self.virt_addr.0 as *mut T);
+
+            // Free object memory using the same layout as in constructor.
+            GLOBAL_ALLOCATOR.dealloc(self.virt_addr.0 as *mut u8,
+                Layout::from_size_align(4096, 4096).unwrap());
+        }
+    }
 }

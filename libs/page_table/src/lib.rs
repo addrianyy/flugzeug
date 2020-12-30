@@ -15,6 +15,8 @@ pub const PAGE_SIZE:            u64 = 1 << 7;
 pub const PAGE_PAT:             u64 = 1 << 7;
 pub const PAGE_NX:              u64 = 1 << 63;
 
+const U64_SIZE: u64 = core::mem::size_of::<u64>() as u64;
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[repr(C)]
 pub struct PhysAddr(pub u64);
@@ -236,13 +238,9 @@ impl PageTable {
         let mut table = self.table.0;
 
         for (depth, &index) in indices.iter().enumerate() {
-            // Get the physical address of current entry.
             let entry_ptr = PhysAddr(table + index * U64_SIZE);
-
-            // Get the virtual address of current entry.
             let entry_ptr = phys_mem.translate(entry_ptr, U64_SIZE as usize)? as *mut u64;
-
-            let entry = *entry_ptr;
+            let entry     = *entry_ptr;
 
             if depth != indices.len() - 1 {
                 if entry & PAGE_PRESENT == 0 {
@@ -287,6 +285,61 @@ impl PageTable {
 
             // Go to the next level in paging hierarchy.
             table = *entry_ptr & 0xffffffffff000;
+        }
+
+        unreachable!()
+    }
+
+    pub fn virt_to_phys(
+        &self,
+        phys_mem:  &mut impl PhysMem,
+        virt_addr: VirtAddr,
+    ) -> Option<PhysAddr> {
+        if !virt_addr.is_canonical() {
+            return None;
+        }
+
+        let indices = [
+            (virt_addr.0 >> 39) & 0x1ff,
+            (virt_addr.0 >> 30) & 0x1ff,
+            (virt_addr.0 >> 21) & 0x1ff,
+            (virt_addr.0 >> 12) & 0x1ff,
+        ];
+
+        let mut table = self.table.0;
+
+        for (depth, &index) in indices.iter().enumerate() {
+            let entry = unsafe {
+                let entry_ptr = PhysAddr(table + index * U64_SIZE);
+                let entry_ptr = phys_mem.translate(entry_ptr, U64_SIZE as usize)? as *mut u64;
+
+                *entry_ptr
+            };
+
+            // Given `virt_addr` is not mapped in.
+            if entry & PAGE_PRESENT == 0 {
+                return None;
+            }
+
+            let page_mask = if entry & PAGE_SIZE != 0 {
+                match depth {
+                    1 => Some(0x3fffffff), // 1G page.
+                    2 => Some(0x1fffff  ), // 2M page.
+                    _ => return None,      // Invalid page table entry.
+                }
+            } else if depth == indices.len() - 1 {
+                // Standard 4K page.
+                Some(0xfff)
+            } else {
+                None
+            };
+
+            if let Some(page_mask) = page_mask {
+                return Some(PhysAddr((entry & 0xffffffffff000) + (virt_addr.0 & page_mask)));
+            }
+
+            // Go to the next level in paging hierarchy.
+            table = entry & 0xffffffffff000;
         }
 
         unreachable!()
