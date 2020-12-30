@@ -1,8 +1,9 @@
 use alloc::{vec, boxed::Box};
 
+use crate::{mm, font};
+
 use boot_block::{FramebufferInfo, PixelFormat};
 use page_table::PhysAddr;
-use crate::{mm, font};
 use lock::Lock;
 
 pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
@@ -115,7 +116,7 @@ impl Framebuffer {
 }
 
 struct Font {
-    data:          &'static [u8],
+    data:          &'static [Option<&'static [u8]>],
     width:         usize,
     height:        usize,
     visual_width:  usize,
@@ -128,7 +129,7 @@ struct Font {
 
 impl Font {
     fn new(
-        data:     &'static [u8],
+        data:     &'static [Option<&'static [u8]>],
         width:    usize,
         height:   usize,
         x_padding:usize,
@@ -136,7 +137,7 @@ impl Font {
         x_scale:  usize,
         y_scale:  usize,
     ) -> Self {
-        assert!(width  == 8, "Font width must be equal to 8.");
+        assert!(width  >  0, "Font width cannot be 0.");
         assert!(height >  0, "Font height cannot be 0.");
 
         assert!(x_scale > 0, "X scale cannot be 0.");
@@ -156,29 +157,55 @@ impl Font {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw(&self, ch: u8, x: usize, y: usize, foreground: u32, background: u32,
-            line_buffer: &mut [u32], framebuffer: &mut Framebuffer) {
-        let index     = (ch as usize) * self.height;
-        let char_data = &self.data[index..][..self.height];
+    fn draw(
+        &self,
+        ch:          u8,
+        x:           usize,
+        y:           usize,
+        foreground:  u32,
+        background:  u32,
+        line_buffer: &mut [u32],
+        framebuffer: &mut Framebuffer,
+    ) {
+        let char_index = ch as usize;
+        if  char_index >= self.data.len() {
+            return;
+        }
 
-        for (oy, &line_data) in char_data.iter().enumerate().take(self.height) {
-            if line_data == 0 {
-                continue;
-            }
+        if let Some(char_data) = self.data[ch as usize] {
+            let mut index = 0;
+            let mut bit   = 0;
 
-            for ox in 0..self.width {
-                let set   = line_data & (1 << (7 - ox)) != 0;
-                let color = if set { foreground } else { background };
+            for oy in 0..self.height {
+                for ox in 0..self.width {
+                    let set   = char_data[index] & (1 << bit) != 0;
+                    let color = if set { foreground } else { background };
 
-                for index in 0..self.x_scale {
-                    line_buffer[ox * self.x_scale + index] = color;
+                    for index in 0..self.x_scale {
+                        line_buffer[ox * self.x_scale + index] = color;
+                    }
+
+                    bit += 1;
+
+                    if bit >= 8 {
+                        bit    = 0;
+                        index += 1;
+                    }
                 }
-            }
 
-            for index in 0..self.y_scale {
-                framebuffer.set_pixels_in_line(x + self.x_padding,
-                                               y + self.y_padding + oy * self.y_scale + index,
-                                               line_buffer);
+                if bit != 0 {
+                    bit    = 0;
+                    index += 1;
+                }
+
+                if !line_buffer.iter().all(|&color| color == background) {
+                    for index in 0..self.y_scale {
+                        let x = x + self.x_padding;
+                        let y = y + self.y_padding + oy * self.y_scale + index;
+
+                        framebuffer.set_pixels_in_line(x, y, line_buffer);
+                    }
+                }
             }
         }
     }
@@ -218,14 +245,7 @@ impl TextFramebuffer {
     }
 
     fn new(framebuffer: Framebuffer) -> Self {
-        // Pick higher scale above some threshold to make sure that text isn't too small.
-        let scale = if framebuffer.width * framebuffer.height > 2560 * 1440 {
-            2
-        } else {
-            1
-        };
-
-        let font = Font::new(&font::FONT, 8, font::HEIGHT, 1, 1, scale, scale);
+        let font = Font::new(&font::DATA, font::WIDTH, font::HEIGHT, 0, 2, 1, 1);
 
         let width  = framebuffer.width  / font.visual_width;
         let height = framebuffer.height / font.visual_height;
