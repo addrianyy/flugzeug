@@ -167,7 +167,7 @@ impl Drop for EmergencyWriter {
 
 pub unsafe fn halt() -> ! {
     // Make sure that nobody will interrupt us before we halt.
-    asm!("cli");
+    cpu::disable_interrupts();
 
     if has_core_locals() {
         if let Some(apic_id) = core!().apic_id() {
@@ -180,7 +180,7 @@ pub unsafe fn halt() -> ! {
 
 unsafe fn begin_panic() -> bool {
     // Make sure to disable interrupts as system is in possibly invalid state.
-    asm!("cli");
+    cpu::disable_interrupts();
 
     if !has_core_locals() {
         return true;

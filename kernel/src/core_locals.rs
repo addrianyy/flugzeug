@@ -17,13 +17,20 @@ macro_rules! core {
 }
 
 #[inline]
+pub fn get_raw_core_locals() -> usize {
+    let core_locals: usize;
+
+    unsafe {
+        asm!("mov {}, gs:[0]", out(reg) core_locals);
+    }
+
+    core_locals
+}
+
+#[inline]
 pub fn get_core_locals() -> &'static CoreLocals {
     unsafe {
-        let core_locals: usize;
-
-        asm!("mov {}, gs:[0]", out(reg) core_locals);
-
-        &*(core_locals as *const CoreLocals)
+        &*(crate::core_locals::get_raw_core_locals() as *const CoreLocals)
     }
 }
 
@@ -247,9 +254,8 @@ unsafe fn initialize_xsave() {
     core::ptr::write_bytes(xsave_area, 0, xsave_size);
 
     // Manually get core locals so we get a mutable reference.
-    let core_locals: usize;
-    asm!("mov {}, gs:[0]", out(reg) core_locals);
+    let core_locals = get_raw_core_locals() as *mut CoreLocals;
 
     // Save address of XSAVE area.
-    (*(core_locals as *mut CoreLocals)).xsave_area = xsave_area as usize;
+    (*core_locals).xsave_area = xsave_area as usize;
 }

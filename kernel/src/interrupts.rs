@@ -1,6 +1,8 @@
 use core::alloc::{GlobalAlloc, Layout};
 use alloc::{vec, vec::Vec, boxed::Box};
 
+use cpu::TableRegister;
+
 use crate::{mm, panic};
 
 pub struct Interrupts {
@@ -49,13 +51,6 @@ struct Tss {
     reserved3:   u64,
     reserved4:   u16,
     iopb_offset: u16,
-}
-
-#[repr(C, packed)]
-#[derive(Copy, Clone)]
-struct TableRegister {
-    limit: u16,
-    base:  u64,
 }
 
 #[repr(C, align(16))]
@@ -132,15 +127,15 @@ pub unsafe fn initialize() {
 
     // Create a GDTR that will point to the newly created GDT.
     let gdtr = TableRegister {
-        base:  gdt.as_ptr() as u64,
+        base:  gdt.as_ptr() as usize,
         limit: core::mem::size_of_val(&gdt[..]) as u16 - 1,
     };
 
     // Load new GDT.
-    asm!("lgdt [{}]", in(reg) &gdtr);
+    cpu::set_gdt(&gdtr);
 
     // Load new TSS.
-    asm!("ltr {:x}", in(reg) tss_selector);
+    cpu::set_tr(tss_selector);
 
     let mut idt = Vec::with_capacity(256);
 
@@ -165,12 +160,12 @@ pub unsafe fn initialize() {
 
     // Create a IDTR that will point to the newly created IDT.
     let idtr = TableRegister {
-        base:  idt.as_ptr() as u64,
+        base:  idt.as_ptr() as usize,
         limit: core::mem::size_of_val(&idt[..]) as u16 - 1,
     };
 
     // Load new IDT.
-    asm!("lidt [{}]", in(reg) &idtr);
+    cpu::set_idt(&idtr);
 
     // Reenable NMIs.
     cpu::outb(0x70, cpu::inb(0x70) & 0x7f);

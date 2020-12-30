@@ -12,43 +12,6 @@ pub struct Cpuid {
     pub edx: u32,
 }
 
-#[derive(Default, Debug)]
-pub struct CpuFeatures {
-    pub fpu: bool,
-    pub vme: bool,
-    pub de:  bool,
-    pub pse: bool,
-    pub tsc: bool,
-    pub mmx: bool,
-    pub fxsr: bool,
-    pub sse: bool,
-    pub sse2: bool,
-    pub htt: bool,
-    pub sse3: bool,
-    pub ssse3: bool,
-    pub sse4_1: bool,
-    pub sse4_2: bool,
-    pub x2apic: bool,
-    pub aesni: bool,
-    pub xsave: bool,
-    pub avx: bool,
-    pub avx2: bool,
-    pub fma: bool,
-    pub apic: bool,
-    pub vmx: bool,
-    pub lahf: bool,
-    pub lzcnt: bool,
-    pub prefetchw: bool,
-    pub syscall: bool,
-    pub xd: bool,
-    pub rdtscp: bool,
-    pub bits64: bool,
-    pub avx512f: bool,
-    pub page2m: bool,
-    pub page1g: bool,
-    pub invariant_tsc: bool,
-}
-
 pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
     let mut cpuid = Cpuid::default();
 
@@ -61,6 +24,43 @@ pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
     cpuid
 }
 
+#[derive(Default, Debug)]
+pub struct CpuFeatures {
+    pub fpu:            bool,
+    pub vme:            bool,
+    pub de:             bool,
+    pub pse:            bool,
+    pub tsc:            bool,
+    pub mmx:            bool,
+    pub fxsr:           bool,
+    pub sse:            bool,
+    pub sse2:           bool,
+    pub htt:            bool,
+    pub sse3:           bool,
+    pub ssse3:          bool,
+    pub sse4_1:         bool,
+    pub sse4_2:         bool,
+    pub x2apic:         bool,
+    pub aesni:          bool,
+    pub xsave:          bool,
+    pub avx:            bool,
+    pub avx2:           bool,
+    pub fma:            bool,
+    pub apic:           bool,
+    pub vmx:            bool,
+    pub lahf:           bool,
+    pub lzcnt:          bool,
+    pub prefetchw:      bool,
+    pub syscall:        bool,
+    pub xd:             bool,
+    pub rdtscp:         bool,
+    pub bits64:         bool,
+    pub avx512f:        bool,
+    pub page2m:         bool,
+    pub page1g:         bool,
+    pub invariant_tsc:  bool,
+}
+
 pub fn get_features() -> CpuFeatures {
     let mut features = CpuFeatures::default();
 
@@ -68,7 +68,7 @@ pub fn get_features() -> CpuFeatures {
     let max_extended_cpuid = cpuid(0x80000000, 0).eax;
 
     if max_cpuid >= 1 {
-        let cpuid   = cpuid(1, 0);
+        let cpuid = cpuid(1, 0);
 
         features.fpu    = ((cpuid.edx >>  0) & 1) == 1;
         features.vme    = ((cpuid.edx >>  1) & 1) == 1;
@@ -155,10 +155,6 @@ pub unsafe fn ind(port: u16) -> u32 {
     value
 }
 
-pub unsafe fn invlpg(addr: usize) {
-    asm!("invlpg [{}]", in(reg) addr);
-}
-
 pub unsafe fn rdmsr(msr: u32) -> u64 {
     let low:  u32;
     let high: u32;
@@ -175,21 +171,8 @@ pub unsafe fn wrmsr(msr: u32, value: u64) {
     asm!("wrmsr", in("edx") high, in("eax") low, in("ecx") msr);
 }
 
-pub fn halt() -> ! {
-    loop {
-        unsafe {
-            asm!(r#"
-                cli
-                hlt
-            "#);
-        }
-    }
-}
-
-pub fn pause() {
-    unsafe {
-        asm!("pause");
-    }
+pub unsafe fn invlpg(addr: usize) {
+    asm!("invlpg [{}]", in(reg) addr);
 }
 
 pub fn get_xcr0() -> u64 {
@@ -209,6 +192,14 @@ pub fn get_xcr0() -> u64 {
     }
 
     low as u64 | (high as u64) << 32
+}
+
+pub unsafe fn enable_interrupts() {
+    asm!("sti");
+}
+
+pub unsafe fn disable_interrupts() {
+    asm!("cli");
 }
 
 pub unsafe fn zero_idt() {
@@ -237,4 +228,104 @@ pub unsafe fn zero_idt() {
 
         asm!("lidt [rax]", in("rax") &idt);
     }
+}
+
+pub fn halt() -> ! {
+    loop {
+        unsafe {
+            asm!(r#"
+                cli
+                hlt
+            "#);
+        }
+    }
+}
+
+#[derive(Copy, Clone, Default)]
+#[repr(C, packed)]
+pub struct TableRegister {
+    pub limit: u16,
+    pub base:  usize,
+}
+
+pub fn get_gdt() -> TableRegister {
+    let mut table = TableRegister::default();
+
+    unsafe {
+        asm!("sgdt [{}]", in(reg) &mut table);
+    }
+
+    table
+}
+
+pub fn get_idt() -> TableRegister {
+    let mut table = TableRegister::default();
+
+    unsafe {
+        asm!("sidt [{}]", in(reg) &mut table);
+    }
+
+    table
+}
+
+pub unsafe fn set_gdt(table: &TableRegister) {
+    asm!("lgdt [{}]", in(reg) table); 
+}
+
+pub unsafe fn set_idt(table: &TableRegister) {
+    asm!("lidt [{}]", in(reg) table); 
+}
+
+pub fn get_tr() -> u16 {
+    let tr: u16;
+
+    unsafe {
+        asm!("str {:x}", out(reg) tr);
+    }
+
+    tr
+}
+
+pub unsafe fn set_tr(tr: u16) {
+    asm!("ltr {:x}", in(reg) tr);
+}
+
+pub fn get_cr0() -> usize {
+    let result;
+
+    unsafe {
+        asm!("mov {}, cr0", out(reg) result);
+    }
+
+    result
+}
+
+pub fn get_cr2() -> usize {
+    let result;
+
+    unsafe {
+        asm!("mov {}, cr2", out(reg) result);
+    }
+
+    result
+}
+
+pub fn get_cr3() -> usize {
+    let result;
+
+    unsafe {
+        asm!("mov {}, cr3", out(reg) result);
+    }
+
+    result
+}
+
+pub fn get_cr4() -> usize {
+    let result;
+
+    unsafe {
+        asm!("mov {}, cr4", out(reg) result);
+    }
+
+    result
 }
