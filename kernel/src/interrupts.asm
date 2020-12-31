@@ -33,7 +33,7 @@ call_handler:
     xgetbv
 
     mov rcx, gs:[8]
-    xsave [rcx]
+    xsave64 [rcx]
 
     pop rdx
     pop rcx
@@ -65,7 +65,7 @@ call_handler:
     xgetbv
 
     mov rcx, gs:[8]
-    xrstor [rcx]
+    xrstor64 [rcx]
 
     pop rdx
     pop rcx

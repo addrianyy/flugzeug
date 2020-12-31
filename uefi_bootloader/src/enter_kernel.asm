@@ -156,12 +156,6 @@ enter_kernel:
     xor rcx, rcx
     xsetbv
 
-    ; Clear IA32_XSS because we only use XCR0.
-    mov ecx, 0xda0
-    xor eax, eax
-    xor edx, edx
-    wrmsr
-
     ; We are currently executing code in identity map. Because kernel provides only
     ; linear map, we need to switch to it. It's as simple as adding `Physical region base`
     ; to the target instruction address.

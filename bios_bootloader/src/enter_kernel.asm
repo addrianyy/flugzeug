@@ -51,12 +51,6 @@ enter_kernel:
     xor ecx, ecx
     xsetbv
 
-    ; Clear IA32_XSS because we only use XCR0.
-    mov ecx, 0xda0
-    xor eax, eax
-    xor edx, edx
-    wrmsr
-
     ; Switch CPU to long mode.
     jmp 0x08:.entry_64
 
