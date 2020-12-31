@@ -58,6 +58,7 @@ pub struct CoreLocals {
     /// Interrupt handlers for this core.
     pub interrupts: Lock<Option<Interrupts>>,
 
+    /// TSC when this core entered bootloader.
     pub boot_tsc: u64,
 
     /// APIC ID for this core. !0 if not cached yet.
@@ -119,11 +120,10 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
     // Make sure that core locals haven't been initialized yet.
     assert!(cpu::rdmsr(IA32_GS_BASE) == 0, "Core locals were already initialized.");
 
-    // Get a unique identifier for this core.
-    let core_id = NEXT_FREE_CORE_ID.fetch_add(1, Ordering::SeqCst);
-
+    // Make sure that we got valid boot block from the bootloader.
     assert!(boot_block.0 != 0, "Boot block is null.");
 
+    let core_id    = NEXT_FREE_CORE_ID.fetch_add(1, Ordering::SeqCst);
     let boot_block = mm::phys_ref::<BootBlock>(boot_block).unwrap();
 
     // Make sure that structure size is the same in 32 bit and 64 bit mode.
@@ -131,17 +131,43 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
             "Boot block size mismatch.");
 
     let core_locals_ptr = {
-        let mut free_memory = boot_block.free_memory.lock();
-        let free_memory     = free_memory.as_mut().unwrap();
+        let size  = core::mem::size_of::<CoreLocals>()  as u64;
+        let align = core::mem::align_of::<CoreLocals>() as u64;
 
-        // Allocate core locals using physical allocator, at this stage it is the only
-        // allocator available.
-        let core_locals_phys = free_memory.allocate(
-            core::mem::size_of::<CoreLocals>()  as u64,
-            core::mem::align_of::<CoreLocals>() as u64,
-        ).expect("Failed to allocate core locals.") as u64;
+        // Validate `CoreLocals` constrains.
+        assert!(align <= 4096, "`CoreLocals` must have alignment <= 4096 bytes.");
+        assert!(size  > 0, "`CoreLocals` size must be > 0.");
 
-        mm::phys_ref::<CoreLocals>(PhysAddr(core_locals_phys)).unwrap() as *const _ as usize
+        // Align the size and reserve virtual region for `CoreLocals`.
+        let aligned_size = (size + 0xfff) & !0xfff;
+        let virt_addr    = mm::reserve_virt_addr(aligned_size as usize);
+
+        let mut page_table = boot_block.page_table.lock();
+        let page_table     = page_table.as_mut().unwrap();
+
+        // Normal `PhysicalMemory` uses `CoreLocals` so we cannot use it.
+        struct EarlyPhysicalMemory(&'static BootBlock);
+
+        impl page_table::PhysMem for EarlyPhysicalMemory {
+            unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
+                mm::translate(phys_addr, size)
+            }
+
+            fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
+                let mut free_memory = self.0.free_memory.lock();
+                let free_memory     = free_memory.as_mut().unwrap();
+
+                free_memory.allocate(layout.size() as u64, layout.align() as u64)
+                    .map(|addr| PhysAddr(addr as u64))
+            }
+        }
+
+        // Allocate `CoreLocals` and map it to virtual memory.
+        page_table.map(&mut EarlyPhysicalMemory(boot_block), virt_addr,
+                       page_table::PageType::Page4K, aligned_size, true, false)
+            .expect("Failed to map `CoreLocals`.");
+
+        virt_addr.0 as usize
     };
 
     let core_locals = CoreLocals {
