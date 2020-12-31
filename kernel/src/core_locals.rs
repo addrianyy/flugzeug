@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use core::alloc::Layout;
 use core::alloc::GlobalAlloc;
 
@@ -45,6 +45,9 @@ pub struct CoreLocals {
     /// Required offset: 8.
     /// DON'T CHANGE!
     xsave_area: usize,
+
+    /// Required size of the XSAVE area.
+    xsave_size: AtomicUsize,
 
     /// Unique identifier for this CPU. 0 is BSP.
     pub id: u64,
@@ -108,11 +111,20 @@ impl CoreLocals {
             .expect("Cannot get APIC mode before initializing APIC.")
             .mode()
     }
+
+    #[allow(unused)]
+    pub fn xsave_size(&self) -> usize {
+        let xsave_size = self.xsave_size.load(Ordering::Relaxed);
+
+        assert!(xsave_size > 0, "XSAVE size not calculated yet.");
+
+        xsave_size
+    }
 }
 
 // Make sure that `CoreLocals` is Sync.
 trait SyncGuard: Sync + Sized {}
-impl SyncGuard for CoreLocals {}
+impl  SyncGuard for CoreLocals {}
 
 pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
     const IA32_GS_BASE: u32 = 0xc0000101;
@@ -174,6 +186,7 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
         boot_tsc,
         self_address: core_locals_ptr,
         xsave_area:   0,
+        xsave_size:   AtomicUsize::new(0),
         id:           core_id,
         apic:         Lock::new(None),
         apic_id:      AtomicU32::new(!0),
@@ -284,4 +297,7 @@ unsafe fn initialize_xsave() {
 
     // Save address of XSAVE area.
     (*core_locals).xsave_area = xsave_area as usize;
+
+    // Save size of XSAVE area.
+    (*core_locals).xsave_size.store(xsave_size, Ordering::Relaxed);
 }

@@ -338,3 +338,7 @@ pub fn get_cr4() -> usize {
 
     result
 }
+
+pub unsafe fn set_cr3(cr3: usize) {
+    asm!("mov cr3, {}", in(reg) cr3);
+}

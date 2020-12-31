@@ -20,6 +20,8 @@ pub const KERNEL_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 pub const KERNEL_HEAP_BASE:    u64 = 0xffff_8000_0000_0000;
 pub const KERNEL_HEAP_PADDING: u64 = 4096;
 
+pub const MAX_SUPPORTED_MODES: usize = 128;
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct AcpiTables {
@@ -45,8 +47,6 @@ pub struct FramebufferInfo {
     pub fb_base:             u64,
     pub fb_size:             u64,
 }
-
-pub const MAX_SUPPORTED_MODES: usize = 128;
 
 #[repr(C)]
 #[derive(Clone)]

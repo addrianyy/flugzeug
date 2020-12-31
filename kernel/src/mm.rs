@@ -1,12 +1,12 @@
 use core::alloc::{GlobalAlloc, Layout};
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use core::ops::{Deref, DerefMut};
 use core::marker::PhantomData;
 
 use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
                  PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE, PAGE_PAT, PAGE_PWT};
 use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
-                 KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING};
+                 KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING, BootBlock};
 
 pub struct PhysicalMemory;
 
@@ -352,8 +352,7 @@ unsafe fn enable_nx_on_physical_region() {
     let page_type = match page_size {
         PAGE_2M  => PageType::Page2M,
         PAGE_1G  => PageType::Page1G,
-        _        => panic!("Bootloader set invalid physical map page size {:x}.",
-                           page_size),
+        _        => panic!("Bootloader set invalid physical map page size {:x}.", page_size),
     };
 
     let mut page_table = core!().boot_block.page_table.lock();
@@ -361,11 +360,10 @@ unsafe fn enable_nx_on_physical_region() {
 
     // Recreate kernel physical memory map.
     for phys_addr in (0..KERNEL_PHYSICAL_REGION_SIZE).step_by(page_size as usize) {
-        // Map current `phys_addr` at virtual address
-        // `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`.
+        // Map current `phys_addr` at virtual address `phys_addr` + `KERNEL_PHYSICAL_REGION_BASE`.
         let virt_addr = VirtAddr(phys_addr + KERNEL_PHYSICAL_REGION_BASE);
 
-        // This physical memory page will be writable. Unlike bootloader, we can now set NX bit.
+        // This physical memory page will be writable. Unlike in bootloader, we can now set NX bit.
         let mut raw = phys_addr | PAGE_PRESENT | PAGE_WRITE | PAGE_NX;
 
         // Set PAGE_SIZE bit if we aren't using standard 4K pages.
@@ -380,7 +378,10 @@ unsafe fn enable_nx_on_physical_region() {
     }
 }
 
-pub unsafe fn on_finished_boot_process() {
+unsafe fn cleanup_bootloader() {
+    // `AP entrypoint` will become invalid, clear it.
+    *core!().boot_block.ap_entrypoint.lock() = None;
+
     // Make kernel physcial memory map non-executable.
     enable_nx_on_physical_region();
 
@@ -412,6 +413,90 @@ pub unsafe fn on_finished_boot_process() {
 
     println!("Reclaimed {} of boot memory. {} of available memory.",
              Memory(total_reclaimed), Memory(total_free));
+}
+
+pub unsafe fn on_finished_boot_process() {
+    static READY_CORES:    AtomicU32   = AtomicU32::new(0);
+    static NEW_BOOT_BLOCK: AtomicUsize = AtomicUsize::new(0);
+
+    let core_id      = core!().id;
+    let raw_locals   = crate::core_locals::get_raw_core_locals();
+    let block_offset = {
+        // Get the offset from start of `CoreLocals` to `bloot_block` field.
+        // We will use this offset to access `BootBlock` reference as a pointer.
+        let start  =  core!()            as *const _ as usize;
+        let target = &core!().boot_block as *const _ as usize;
+
+        target - start
+    };
+
+    // This core is now ready to switch boot block.
+    READY_CORES.fetch_add(1, Ordering::SeqCst);
+
+    let block_pointer = match core_id {
+        0 => {
+            // We are the BSP, we will allocate new boot block and inform other cores about it.
+
+            // Allocate new space that will hold `BootBlock`.
+            let block_pointer = GLOBAL_ALLOCATOR.alloc(
+                Layout::from_size_align(
+                    core::mem::size_of::<BootBlock>(),
+                    core::mem::align_of::<BootBlock>(),
+                ).unwrap(),
+            ) as *mut BootBlock;
+
+            assert!(!block_pointer.is_null(), "Failed to allocate `BootBlock`.");
+
+            // Wait for all cores to become ready to switch boot block.
+            while READY_CORES.load(Ordering::SeqCst) != crate::processors::total_cores() {
+                core::sync::atomic::spin_loop_hint();
+            }
+
+            // Get the pointer to the boot block in the bootloader memory. We have now
+            // exclusive access to it.
+            let original_boot_block = core::ptr::read((raw_locals + block_offset) as
+                                                      *mut *mut BootBlock);
+
+            // Move the boot block from the original location to the new location.
+            let boot_block = core::ptr::read(original_boot_block);
+            core::ptr::write(block_pointer, boot_block);
+
+            // Inform other cores about new boot block pointer. At this point we
+            // lose exclusive access.
+            NEW_BOOT_BLOCK.store(block_pointer as usize, Ordering::SeqCst);
+
+            block_pointer as *const BootBlock
+        }
+        _ => {
+            // We are the AP, we will wait for new boot block from BSP.
+
+            let mut block_pointer = 0;
+
+            // Wait for the new boot block.
+            while block_pointer == 0 {
+                block_pointer = NEW_BOOT_BLOCK.load(Ordering::SeqCst);
+
+                core::sync::atomic::spin_loop_hint();
+            }
+
+            block_pointer as *const BootBlock
+        }
+    };
+
+    // Switch to the new boot block.
+    core::ptr::write((raw_locals + block_offset) as *mut *const BootBlock, block_pointer);
+
+    // Make sure that switch succeeded by checking size of the boot block.
+    assert!(core!().boot_block.size == core::mem::size_of::<BootBlock>() as u64,
+            "Switching boot block failed.");
+
+    if core_id == 0 {
+        // We don't depend on bootloader anymore, clean up memory.
+        cleanup_bootloader();
+    }
+
+    // Flush whole TLB.
+    cpu::set_cr3(cpu::get_cr3());
 }
 
 #[allow(unused)]

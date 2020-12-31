@@ -5,7 +5,7 @@ use lock::Lock;
 use rangeset::{RangeSet, Range};
 use page_table::{PhysMem, PhysAddr};
 
-use crate::{BOOT_BLOCK, efi, binaries};
+use crate::{BOOT_BLOCK, efi};
 use efi::EfiGuid;
 
 // When handling APs we will have only first 4GB mapped in.
@@ -238,22 +238,8 @@ pub unsafe fn initialize_and_exit_boot_services(image_handle: usize,
             }
         }
 
-        let bootloader = bootloader_image();
-
-        // Remove ourselves from boot memory to save `BOOT_BLOCK` from being corrupted later.
-        boot_memory.remove(Range {
-            start: bootloader.base as u64,
-            end:   (bootloader.base + bootloader.size - 1) as u64,
-        });
-
-        // Bootloader contains kernel binary which is not used after booting but takes a 
-        // lot of space. Readd it to boot memory.
-        let binary_base = binaries::KERNEL.as_ptr() as usize as u64;
-        let binary_end  = binary_base + (binaries::KERNEL.len() as u64) - 1;
-        boot_memory.insert(Range {
-            start: binary_base,
-            end:   binary_end,
-        });
+        // `boot_memory` now contains our bootloader. After finishing boot process it is not
+        // needed. Boot block will be moved by the kernel so it can be freed here too.
 
         // Even if we will fail to exit we won't be able to use EFI print services anymore.
         crate::print::on_exited_boot_services();

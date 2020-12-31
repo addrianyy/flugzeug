@@ -29,6 +29,7 @@ use lock::Lock;
 /// Boot block is a shared data structure between kernel and bootloader. It must have
 /// exactly the same shape in 32 bit and 64 bit mode. It allows for concurrent memory
 /// allocation and modification and serial port interface.
+/// It will be moved to the kernel after finishing boot process.
 pub static BOOT_BLOCK: BootBlock = BootBlock::new();
 
 /// Data required to enter the kernel. If it is `None` then kernel wasn't loaded

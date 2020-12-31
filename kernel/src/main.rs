@@ -7,7 +7,7 @@ extern crate alloc;
 
 #[macro_use] mod core_locals;
 #[macro_use] mod print;
-mod vm;
+//mod vm;
 mod mm;
 mod apic;
 mod acpi;
@@ -58,11 +58,9 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         // Notify that this core is online and wait for other cores.
         processors::notify_core_online();
 
-        if core!().id == 0 {
-            // All cores are now launched and we have finished boot process.
-            // Allow memory manager to clean up some things.
-            mm::on_finished_boot_process();
-        }
+        // All cores are now launched and we have finished boot process.
+        // Allow memory manager to clean some things up.
+        mm::on_finished_boot_process();
     }
 
     if core!().id == 0 {
@@ -76,9 +74,11 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
             color_println!(0xff00ff, "Running on {}.", cpu_name);
         }
 
+        /*
         unsafe {
             vm::initialize();
         }
+        */
     }
 
     cpu::halt();
