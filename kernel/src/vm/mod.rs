@@ -119,11 +119,13 @@ pub unsafe fn initialize() {
     let vmcb = vm.vmcb_mut();
     vmcb.control.intercept_misc_2 = 1 | 2;
     vmcb.control.intercept_misc_1 = 1 << 31;
+    vmcb.control.intercept_exceptions = 0b11111111111;
     vmcb.control.guest_asid = 1;
 
     vm.run();
 
     println!("Exit reason: 0x{:x}.", vm.vmcb().control.exitcode);
+    println!("Running at CPL {}", vm.cpl());
 }
 
 unsafe fn guest_entrypoint() -> ! {

@@ -70,7 +70,6 @@ pub(super) struct VmcbStateSaveArea {
     reserved_1: [u8; 0xcb - 0xa0],
 
     // Guest current privilege level.
-    // TODO: Expose this in VM.
     pub cpl: u8,
 
     reserved_2: u32,

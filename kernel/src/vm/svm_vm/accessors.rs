@@ -108,6 +108,14 @@ impl Vm {
     pub fn set_segment_reg(&mut self, register: SegmentRegister, segment: Segment) {
         use SegmentRegister::*;
 
+        if register == SegmentRegister::Cs {
+            // Update the CPL when changing CS.
+            let rpl = ((segment.selector >> 0) & 3) as u8;
+            let dpl = ((segment.attrib   >> 5) & 3) as u8;
+
+            self.guest_vmcb.state.cpl = u8::max(rpl, dpl);
+        }
+
         let state = &mut self.guest_vmcb.state;
         let state = match register {
             Es  => &mut state.es,
