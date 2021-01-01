@@ -1,11 +1,12 @@
 mod vmcb;
+mod accessors;
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt;
 
 use crate::mm::{self, PhysicalPage};
 
-pub use vmcb::{Vmcb, VmcbSegmentDescriptor};
+use vmcb::Vmcb;
 
 const VM_CR_MSR:       u32 = 0xc001_0114;
 const VM_HSAVE_PA_MSR: u32 = 0xc001_0117;
@@ -117,10 +118,10 @@ impl Drop for XsaveArea {
     }
 }
 
-/// Enum that describes basic x86 registers.
-/// Don't change the numbers without changing assembly in `Vm::run()`.
-#[repr(usize)]
+// Don't change the numbers without changing assembly in `Vm::run()`.
 #[allow(unused)]
+#[repr(usize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Register {
     Rax    = 0,
     Rcx    = 1,
@@ -140,6 +141,77 @@ pub enum Register {
     R15    = 15,
     Rip    = 16,
     Rflags = 17,
+
+    Efer,
+    Cr0,
+    Cr2,
+    Cr3,
+    Cr4,
+    Dr6,
+    Dr7,
+    Star,
+    Lstar,
+    Cstar,
+    Sfmask,
+    KernelGsBase,
+    SysenterCs,
+    SysenterEsp,
+    SysenterEip,
+    Pat,
+}
+
+#[allow(unused)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TableRegister {
+    Gdt,
+    Idt,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct DescriptorTable {
+    pub base:  u64,
+    pub limit: u16,
+}
+
+impl DescriptorTable {
+    pub fn null() -> Self {
+        Self {
+            base:  0,
+            limit: 0,
+        }
+    }
+}
+
+#[allow(unused)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SegmentRegister {
+    Es,
+    Cs,
+    Ss,
+    Ds,
+    Fs,
+    Gs,
+    Ldt,
+    Tr,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Segment {
+    pub selector: u16,
+    pub attrib:   u16,
+    pub limit:    u32,
+    pub base:     u64,
+}
+
+impl Segment {
+    pub fn null(selector: u16) -> Self {
+        Self {
+            selector,
+            attrib:   0,
+            limit:    0,
+            base:     0,
+        }
+    }
 }
 
 pub struct Vm {
@@ -171,14 +243,6 @@ impl Vm {
 
             guest_registers: [0; 18],
         })
-    }
-
-    pub fn reg(&self, register: Register) -> u64 {
-        self.guest_registers[register as usize]
-    }
-
-    pub fn set_reg(&mut self, register: Register, value: u64) {
-        self.guest_registers[register as usize] = value;
     }
 
     pub fn vmcb(&self) -> &Vmcb {

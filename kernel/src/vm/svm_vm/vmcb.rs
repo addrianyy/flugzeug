@@ -3,7 +3,7 @@ use core::mem::MaybeUninit;
 use crate::mm::PhysicalPage;
 
 #[repr(C)]
-pub struct VmcbSegmentDescriptor {
+pub(super) struct VmcbSegmentDescriptor {
     pub selector: u16,
     pub attrib:   u16,
     pub limit:    u32,
@@ -54,67 +54,90 @@ pub struct VmcbControlArea {
 }
 
 #[repr(C)]
-pub struct VmcbStateSaveArea {
-    pub es:               VmcbSegmentDescriptor,
-    pub cs:               VmcbSegmentDescriptor,
-    pub ss:               VmcbSegmentDescriptor,
-    pub ds:               VmcbSegmentDescriptor,
-    pub fs:               VmcbSegmentDescriptor,
-    pub gs:               VmcbSegmentDescriptor,
-    pub gdtr:             VmcbSegmentDescriptor,
-    pub ldtr:             VmcbSegmentDescriptor,
-    pub idtr:             VmcbSegmentDescriptor,
-    pub tr:               VmcbSegmentDescriptor,
-    reserved_1:           [u8; 0xcb - 0xa0],
-    pub cpl:              u8,
-    reserved_2:           u32,
-    pub efer:             u64,
-    reserved_3:           [u8; 0x148 - 0xd8],
-    pub cr4:              u64,
-    pub cr3:              u64,
-    pub cr0:              u64,
-    pub dr7:              u64,
-    pub dr6:              u64,
+pub(super) struct VmcbStateSaveArea {
+    // Guest segment registers.
+    pub es:   VmcbSegmentDescriptor,
+    pub cs:   VmcbSegmentDescriptor,
+    pub ss:   VmcbSegmentDescriptor,
+    pub ds:   VmcbSegmentDescriptor,
+    pub fs:   VmcbSegmentDescriptor,
+    pub gs:   VmcbSegmentDescriptor,
+    pub gdtr: VmcbSegmentDescriptor,
+    pub ldtr: VmcbSegmentDescriptor,
+    pub idtr: VmcbSegmentDescriptor,
+    pub tr:   VmcbSegmentDescriptor,
 
-    /// `Vm` uses different way to store these registers so make sure they're not available.
-    pub(in super) rflags: u64,
-    pub(in super) rip:    u64,
+    reserved_1: [u8; 0xcb - 0xa0],
 
-    reserved_4:           [u8; 0x1d8 - 0x180],
+    // Guest current privilege level.
+    // TODO: Expose this in VM.
+    pub cpl: u8,
+
+    reserved_2: u32,
+
+    // Guest EFER MSR.
+    pub efer: u64,
+
+    reserved_3: [u8; 0x148 - 0xd8],
+
+    // Guest control registers.
+    pub cr4: u64,
+    pub cr3: u64,
+    pub cr0: u64,
+
+    // Guest debug registers.
+    pub dr7: u64,
+    pub dr6: u64,
+
+    // Guest flags and instruction pointer.
+    pub rflags: u64,
+    pub rip:    u64,
+
+    reserved_4: [u8; 0x1d8 - 0x180],
  
-    /// `Vm` uses different way to store this register so make sure it's not available.
-    pub(in super) rsp: u64,
+    // Guest stack pointer.
+    pub rsp: u64,
 
-    pub s_cet:            u64,
-    pub ssp:              u64,
-    pub isst_addr:        u64,
+    // Shadow stack related registers.
+    pub s_cet:     u64,
+    pub ssp:       u64,
+    pub isst_addr: u64,
 
-    /// `Vm` uses different way to store this register so make sure it's not available.
-    pub(in super) rax: u64,
+    // Guest RAX GPR.
+    pub rax: u64,
 
-    pub star:             u64,
-    pub lstar:            u64,
-    pub cstar:            u64,
-    pub sfmask:           u64,
-    pub kernel_gs_base:   u64,
-    pub sysenter_cs:      u64,
-    pub sysenter_esp:     u64,
-    pub sysenter_eip:     u64,
-    pub cr2:              u64,
-    reserved_5:           [u8; 0x268 - 0x248],
-    pub g_pat:            u64,
+    // Various guest MSRs.
+    pub star:           u64,
+    pub lstar:          u64,
+    pub cstar:          u64,
+    pub sfmask:         u64,
+    pub kernel_gs_base: u64,
+    pub sysenter_cs:    u64,
+    pub sysenter_esp:   u64,
+    pub sysenter_eip:   u64,
+
+    // Address that caused page fault.
+    pub cr2: u64,
+
+    reserved_5: [u8; 0x268 - 0x248],
+
+    // Guest PAT - used only when nested paging is enabled.
+    pub g_pat: u64,
+
+    // LBR virtualization related registers - used only when LBR virtualization is enabled.
     pub dbgctl:           u64,
     pub br_from:          u64,
     pub br_to:            u64,
     pub last_except_from: u64,
     pub last_except_to:   u64,
-    reserved_6:           [u8; 0xc00 - 0x298],
+
+    reserved_6: [u8; 0xc00 - 0x298],
 }
 
 #[repr(C)]
 pub struct Vmcb {
-    pub control: VmcbControlArea,
-    pub state:   VmcbStateSaveArea,
+    pub        control: VmcbControlArea,
+    pub(super) state:   VmcbStateSaveArea,
 }
 
 impl Vmcb {
