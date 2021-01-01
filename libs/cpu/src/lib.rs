@@ -342,3 +342,25 @@ pub fn get_cr4() -> usize {
 pub unsafe fn set_cr3(cr3: usize) {
     asm!("mov cr3, {}", in(reg) cr3);
 }
+
+macro_rules! segment_accesssor {
+    ($function_name: ident, $assembly: expr) => {
+        pub fn $function_name() -> u16 {
+            let result: u16;
+
+            unsafe {
+                asm!($assembly, out(reg) result);
+            }
+
+            result
+        }
+    }
+}
+
+segment_accesssor!(get_cs, "mov {:x}, cs");
+segment_accesssor!(get_ss, "mov {:x}, ss");
+segment_accesssor!(get_ds, "mov {:x}, ds");
+segment_accesssor!(get_es, "mov {:x}, es");
+segment_accesssor!(get_gs, "mov {:x}, gs");
+segment_accesssor!(get_fs, "mov {:x}, fs");
+segment_accesssor!(get_ldt, "sldt {:x}");

@@ -2,12 +2,13 @@ use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use core::alloc::Layout;
 use core::alloc::GlobalAlloc;
 
-use crate::interrupts::Interrupts;
-use crate::apic::{Apic, ApicMode};
-use crate::mm::{self, FreeList};
 use boot_block::BootBlock;
 use page_table::PhysAddr;
 use lock::Lock;
+
+use crate::interrupts::Interrupts;
+use crate::apic::{Apic, ApicMode};
+use crate::mm::{self, FreeList, PhysicalPage};
 
 static NEXT_FREE_CORE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -63,6 +64,9 @@ pub struct CoreLocals {
 
     /// TSC when this core entered bootloader.
     pub boot_tsc: u64,
+
+    /// 4KB of space for SVM to save host state on `vmrun`.
+    pub host_save_area: Lock<Option<PhysicalPage<[u8; 4096]>>>,
 
     /// APIC ID for this core. !0 if not cached yet.
     apic_id: AtomicU32,
@@ -184,13 +188,14 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
 
     let core_locals = CoreLocals {
         boot_tsc,
-        self_address: core_locals_ptr,
-        xsave_area:   0,
-        xsave_size:   AtomicUsize::new(0),
-        id:           core_id,
-        apic:         Lock::new(None),
-        apic_id:      AtomicU32::new(!0),
-        interrupts:   Lock::new(None),
+        self_address:   core_locals_ptr,
+        xsave_area:     0,
+        xsave_size:     AtomicUsize::new(0),
+        id:             core_id,
+        apic:           Lock::new(None),
+        apic_id:        AtomicU32::new(!0),
+        interrupts:     Lock::new(None),
+        host_save_area: Lock::new(None),
         boot_block,
         free_lists: [
             Lock::new(FreeList::new(0x0000000000000008)),

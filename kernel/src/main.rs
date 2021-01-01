@@ -7,7 +7,7 @@ extern crate alloc;
 
 #[macro_use] mod core_locals;
 #[macro_use] mod print;
-//mod vm;
+mod vm;
 mod mm;
 mod apic;
 mod acpi;
@@ -74,11 +74,9 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
             color_println!(0xff00ff, "Running on {}.", cpu_name);
         }
 
-        /*
         unsafe {
             vm::initialize();
         }
-        */
     }
 
     cpu::halt();

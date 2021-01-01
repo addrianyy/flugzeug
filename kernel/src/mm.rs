@@ -651,6 +651,10 @@ impl<T> PhysicalPage<T> {
     pub fn phys_addr(&self) -> PhysAddr {
         self.phys_addr
     }
+
+    pub fn pointer(&mut self) -> *mut T {
+        self.virt_addr.0 as *mut T
+    }
 }
 
 impl<T> Deref for PhysicalPage<T> {
