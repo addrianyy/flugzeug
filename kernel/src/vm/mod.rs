@@ -121,7 +121,7 @@ pub unsafe fn initialize() {
     vm.set_reg(Register::Rsp,          rsp);
     vm.set_reg(Register::Rflags,       2);
 
-    vm.intercept(&[Intercept::Vmmcall, Intercept::Hlt, Intercept::Dr1Read, Intercept::Ss]);
+    vm.intercept(&[Intercept::Vmmcall, Intercept::Hlt]);
 
     let mut mapped_pages = 0;
 
