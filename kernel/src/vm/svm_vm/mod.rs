@@ -391,7 +391,6 @@ impl Vm {
         self.set_reg(Register::Rflags, self.guest_vmcb.state.rflags);
     }
 
-
     #[allow(unused)]
     pub fn cpl(&self) -> u8 {
         self.guest_vmcb.state.cpl

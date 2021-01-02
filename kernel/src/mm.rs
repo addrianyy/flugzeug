@@ -8,6 +8,8 @@ use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE
 use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
                  KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING, BootBlock};
 
+pub const MAX_ACCESSIBLE_PHYSICAL_ADDRESS: u64 = KERNEL_PHYSICAL_REGION_SIZE - 1;
+
 pub struct PhysicalMemory;
 
 impl PhysMem for PhysicalMemory {
@@ -16,12 +18,21 @@ impl PhysMem for PhysicalMemory {
     }
 
     fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
-        let mut free_memory = core!().boot_block.free_memory.lock();
-        let free_memory     = free_memory.as_mut().unwrap();
-
-        free_memory.allocate(layout.size() as u64, layout.align() as u64)
-            .map(|addr| PhysAddr(addr as u64))
+        unsafe {
+            alloc_phys(core!().boot_block, layout)
+        }
     }
+}
+
+pub unsafe fn alloc_phys(boot_block: &BootBlock, layout: Layout) -> Option<PhysAddr> {
+    let mut free_memory = boot_block.free_memory.lock();
+    let free_memory     = free_memory.as_mut().unwrap();
+
+    free_memory.allocate_limited(
+        layout.size()  as u64,
+        layout.align() as u64,
+        Some(MAX_ACCESSIBLE_PHYSICAL_ADDRESS),
+    ).map(|addr| PhysAddr(addr as u64))
 }
 
 pub unsafe fn translate(phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
@@ -402,17 +413,32 @@ unsafe fn cleanup_bootloader() {
         }
     }
 
-    let mut total_free = 0;
+    let mut total_free         = 0;
+    let mut total_inaccessible = 0;
 
     // Sum up all free memory.
     if let Some(free_memory) = core!().boot_block.free_memory.lock().as_ref() {
         for entry in free_memory.entries() {
             total_free += entry.size();
+
+            // Check for memory that we cannot access.
+            if entry.end > MAX_ACCESSIBLE_PHYSICAL_ADDRESS {
+                let inaccessible_start = entry.start.max(MAX_ACCESSIBLE_PHYSICAL_ADDRESS);
+                let inaccessible_size  = (entry.end - inaccessible_start) + 1;
+
+                total_inaccessible += inaccessible_size;
+            }
         }
     }
 
     println!("Reclaimed {} of boot memory. {} of available memory.",
              Memory(total_reclaimed), Memory(total_free));
+
+    if total_inaccessible > 0 {
+        color_println!(0xffcc00, "WARNING: Kernel physical region size ({}) is too small. \
+                       {} of memory is inaccessible.", Memory(KERNEL_PHYSICAL_REGION_SIZE),
+                       Memory(total_inaccessible));
+    }
 }
 
 pub unsafe fn on_finished_boot_process() {

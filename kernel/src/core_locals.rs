@@ -170,11 +170,9 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
             }
 
             fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
-                let mut free_memory = self.0.free_memory.lock();
-                let free_memory     = free_memory.as_mut().unwrap();
-
-                free_memory.allocate(layout.size() as u64, layout.align() as u64)
-                    .map(|addr| PhysAddr(addr as u64))
+                unsafe {
+                    mm::alloc_phys(self.0, layout)
+                }
             }
         }
 

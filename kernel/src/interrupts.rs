@@ -94,7 +94,8 @@ pub unsafe fn initialize() {
 
     // Allocate an emergency stack for certain interrupts.
     let emergency_stack = mm::GLOBAL_ALLOCATOR.alloc(
-        Layout::from_size_align(EMERGENCY_STACK_SIZE, 4096).unwrap()) as u64;
+        Layout::from_size_align(EMERGENCY_STACK_SIZE, 4096).unwrap()
+    ) as u64;
 
     // Create a TSS which will reference our emergency stack.
     let mut tss = Box::new(Tss::default());
