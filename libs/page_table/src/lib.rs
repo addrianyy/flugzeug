@@ -15,7 +15,11 @@ pub const PAGE_SIZE:            u64 = 1 << 7;
 pub const PAGE_PAT:             u64 = 1 << 7;
 pub const PAGE_NX:              u64 = 1 << 63;
 
-const U64_SIZE: u64 = core::mem::size_of::<u64>() as u64;
+/// Internal flag that can be only present on last level entries. It signifies that
+/// backing page should be freed when destroying page table. This bit is ignored by the
+/// architecture.
+const DEALLOCATE_FLAG: u64 = 1 << 9;
+const U64_SIZE:        u64 = core::mem::size_of::<u64>() as u64;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[repr(C)]
@@ -62,6 +66,10 @@ pub trait PhysMem {
 
         Some(phys_addr)
     }
+
+    unsafe fn free_phys(&mut self, _phys_addr: PhysAddr, _size: usize) -> Option<()> {
+        panic!("Freeing is not supported.")
+    }
 }
 
 /// x86 page type. CPU may not support all these page types.
@@ -83,9 +91,10 @@ pub struct PageTable {
 impl PageTable {
     /// Create a new, empty page table witout any mapped memory.
     pub fn new(phys_mem: &mut impl PhysMem) -> Option<Self> {
-        // Allocate empty root table (PML4) and use it.
+        // Allocate empty root table (PML4).
         let table = phys_mem.alloc_phys_zeroed(
-            Layout::from_size_align(4096, 4096).ok()?)?;
+            Layout::from_size_align(4096, 4096).ok()?,
+        )?;
 
         Some(Self {
             table,
@@ -105,8 +114,7 @@ impl PageTable {
         self.table
     }
 
-    /// Map region at `virt_addr` with size `size`. Mapped region will contain usable but
-    /// uninitialized data.
+    /// Map region at `virt_addr` with size `size`. Mapped region will be zeroed.
     pub fn map(
         &mut self,
         phys_mem:  &mut impl PhysMem,
@@ -115,9 +123,10 @@ impl PageTable {
         size:      u64,
         write:     bool,
         exec:      bool,
+        user:      bool,
     ) -> Option<()> {
-        self.map_init(phys_mem, virt_addr, page_type, size,
-                      write, exec, None::<fn(u64) -> u8>)
+        self.map_init(phys_mem, virt_addr, page_type, size, write, exec, user,
+                      None::<fn(u64) -> u8>)
     }
 
     /// Map region at `virt_addr` with size `size`. `init` function is used to initialize
@@ -131,6 +140,7 @@ impl PageTable {
         size:      u64,
         write:     bool,
         exec:      bool,
+        user:      bool,
         init:      Option<impl Fn(u64) -> u8>,
     ) -> Option<()> {
         let page_size = page_type as u64;
@@ -150,15 +160,16 @@ impl PageTable {
         // Go through each page in virtual region.
         for current_virt_addr in (virt_addr.0..=virt_end).step_by(page_size as usize) {
             // Allocate backing physical page.
-            let page = phys_mem.alloc_phys(
-                Layout::from_size_align(page_size as usize,
-                                        page_size as usize).unwrap())?;
+            let page = phys_mem.alloc_phys_zeroed(
+                Layout::from_size_align(page_size as usize, page_size as usize).unwrap(),
+            )?;
 
             // Calculate value of raw page table entry.
             let raw = page.0 | PAGE_PRESENT |
-                if write { PAGE_WRITE } else { 0 } |
-                if exec  { 0 }          else { PAGE_NX } |
-                if large { PAGE_SIZE }  else { 0 };
+                if write { PAGE_WRITE } else { 0       } |
+                if exec  { 0          } else { PAGE_NX } |
+                if user  { PAGE_USER  } else { 0       } |
+                if large { PAGE_SIZE  } else { 0       };
 
             if let Some(init) = &init {
                 let bytes = unsafe {
@@ -174,10 +185,11 @@ impl PageTable {
                 }
             }
 
-            // Map current page. Fail it it was already used.
+            // Map current page. Fail it it was already used. Set `deallocate` flag so
+            // the memory will be freed when destroying page table.
             unsafe {
-                self.map_raw(phys_mem, VirtAddr(current_virt_addr), page_type, raw,
-                             true, false)?;
+                self.map_raw_internal(phys_mem, VirtAddr(current_virt_addr), page_type, raw,
+                                      true, false, true)?;
             }
         }
 
@@ -194,7 +206,27 @@ impl PageTable {
         add:       bool,
         update:    bool,
     ) -> Option<()> {
-        const U64_SIZE: u64 = core::mem::size_of::<u64>() as u64;
+        self.map_raw_internal(phys_mem, virt_addr, page_type, raw, add, update, false)
+    }
+
+    /// Set page table entry value that describes `virt_addr` to `raw`. If `deallocate` flag
+    /// is set then backing memory will be deallocated when destroying page table.
+    unsafe fn map_raw_internal(
+        &mut self,
+        phys_mem:   &mut impl PhysMem,
+        virt_addr:  VirtAddr,
+        page_type:  PageType,
+        mut raw:    u64,
+        add:        bool,
+        update:     bool,
+        deallocate: bool,
+    ) -> Option<()> {
+        // Make sure that nobody set the deallocate flag.
+        assert!(raw & DEALLOCATE_FLAG == 0, "Internal flag was set in page table entry.");
+
+        if deallocate {
+            raw |= DEALLOCATE_FLAG;
+        }
 
         if !virt_addr.is_canonical() {
             return None;
@@ -253,7 +285,8 @@ impl PageTable {
                     }
 
                     let new_table = phys_mem.alloc_phys_zeroed(
-                        Layout::from_size_align(4096, 4096).ok()?)?;
+                        Layout::from_size_align(4096, 4096).ok()?
+                    )?;
 
                     // Create new entry with max permissions and mark it as present.
                     *entry_ptr = new_table.0 | PAGE_PRESENT | PAGE_USER | PAGE_WRITE;
@@ -343,5 +376,51 @@ impl PageTable {
         }
 
         unreachable!()
+    }
+
+    pub unsafe fn destroy(&mut self, phys_mem: &mut impl PhysMem) -> Option<()> {
+        Self::destroy_level(phys_mem, 0, self.table.0 & 0xffffffffff000)
+    }
+
+    unsafe fn destroy_level(phys_mem: &mut impl PhysMem, depth: usize, table: u64) -> Option<()> {
+        let table_phys = PhysAddr(table);
+        let table      = phys_mem.translate(table_phys, 4096)? as *mut u64;
+
+        for index in 0..512 {
+            let entry_ptr = table.add(index);
+            let entry     = *entry_ptr;
+
+            if (entry & PAGE_PRESENT) == 0 {
+                continue;
+            }
+
+            let page_size = if (entry & PAGE_SIZE) != 0 {
+                match depth {
+                    1 => Some(1024 * 1024 * 1024), // 1G page.
+                    2 => Some(2    * 1024 * 1024), // 2M page.
+                    _ => return None,              // Invalid page table entry.
+                }
+            } else if depth == 3 {
+                Some(4096)
+            } else {
+                None
+            };
+
+            let backing = entry & 0xffffffffff000;
+
+            if let Some(page_size) = page_size {
+                if (entry & DEALLOCATE_FLAG) != 0 {
+                    phys_mem.free_phys(PhysAddr(backing), page_size)?;
+                }
+            } else {
+                Self::destroy_level(phys_mem, depth + 1, backing);
+            }
+
+            *entry_ptr = 0;
+        }
+
+        phys_mem.free_phys(table_phys, 4096)?;
+
+        Some(())
     }
 }

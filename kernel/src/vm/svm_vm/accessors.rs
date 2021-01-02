@@ -13,7 +13,7 @@ impl Vm {
                 ($($register: pat, $field: ident),*) => {
                     match register {
                         $(
-                            $register => self.guest_vmcb.state.$field,
+                            $register => self.vmcb().state.$field,
                         )*
                         _ => unreachable!(),
                     }
@@ -53,7 +53,7 @@ impl Vm {
                 ($($register: pat, $field: ident),*) => {
                     match register {
                         $(
-                            $register => self.guest_vmcb.state.$field = value,
+                            $register => self.vmcb_mut().state.$field = value,
                         )*
                         _ => unreachable!(),
                     }
@@ -85,7 +85,7 @@ impl Vm {
     pub fn segment_reg(&self, register: SegmentRegister) -> Segment {
         use SegmentRegister::*;
 
-        let state   = &self.guest_vmcb.state;
+        let state   = &self.vmcb().state;
         let segment = match register {
             Es  => &state.es,
             Cs  => &state.cs,
@@ -113,10 +113,10 @@ impl Vm {
             let rpl = ((segment.selector >> 0) & 3) as u8;
             let dpl = ((segment.attrib   >> 5) & 3) as u8;
 
-            self.guest_vmcb.state.cpl = u8::max(rpl, dpl);
+            self.vmcb_mut().state.cpl = u8::max(rpl, dpl);
         }
 
-        let state = &mut self.guest_vmcb.state;
+        let state = &mut self.vmcb_mut().state;
         let state = match register {
             Es  => &mut state.es,
             Cs  => &mut state.cs,
@@ -136,7 +136,7 @@ impl Vm {
 
     #[allow(unused)]
     pub fn table_reg(&mut self, register: TableRegister) -> DescriptorTable {
-        let state = &self.guest_vmcb.state;
+        let state = &self.vmcb().state;
         let table = match register {
             TableRegister::Idt => &state.idtr,
             TableRegister::Gdt => &state.gdtr,
@@ -149,7 +149,7 @@ impl Vm {
     }
 
     pub fn set_table_reg(&mut self, register: TableRegister, table: DescriptorTable) {
-        let state = &mut self.guest_vmcb.state;
+        let state = &mut self.vmcb_mut().state;
         let state = match register {
             TableRegister::Idt => &mut state.idtr,
             TableRegister::Gdt => &mut state.gdtr,

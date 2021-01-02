@@ -178,7 +178,7 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
 
         // Allocate `CoreLocals` and map it to virtual memory.
         page_table.map(&mut EarlyPhysicalMemory(boot_block), virt_addr,
-                       page_table::PageType::Page4K, aligned_size, true, false)
+                       page_table::PageType::Page4K, aligned_size, true, false, false)
             .expect("Failed to map `CoreLocals`.");
 
         virt_addr.0 as usize

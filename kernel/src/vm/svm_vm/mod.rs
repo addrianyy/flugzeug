@@ -207,9 +207,9 @@ impl Segment {
     pub fn null(selector: u16) -> Self {
         Self {
             selector,
-            attrib:   0,
-            limit:    0,
-            base:     0,
+            attrib: 0,
+            limit:  0,
+            base:   0,
         }
     }
 }
@@ -255,10 +255,10 @@ impl Vm {
 
     pub unsafe fn run(&mut self) {
         // Copy relevant registers from the cache to the VMCB.
-        self.guest_vmcb.state.rax    = self.reg(Register::Rax);
-        self.guest_vmcb.state.rsp    = self.reg(Register::Rsp);
-        self.guest_vmcb.state.rip    = self.reg(Register::Rip);
-        self.guest_vmcb.state.rflags = self.reg(Register::Rflags);
+        self.vmcb_mut().state.rax    = self.reg(Register::Rax);
+        self.vmcb_mut().state.rsp    = self.reg(Register::Rsp);
+        self.vmcb_mut().state.rip    = self.reg(Register::Rip);
+        self.vmcb_mut().state.rflags = self.reg(Register::Rflags);
 
         asm!(
             r#"
@@ -385,14 +385,14 @@ impl Vm {
         );
 
         // Copy relevant registers from the VMCB to the cache.
-        self.set_reg(Register::Rax,    self.guest_vmcb.state.rax);
-        self.set_reg(Register::Rsp,    self.guest_vmcb.state.rsp);
-        self.set_reg(Register::Rip,    self.guest_vmcb.state.rip);
-        self.set_reg(Register::Rflags, self.guest_vmcb.state.rflags);
+        self.set_reg(Register::Rax,    self.vmcb().state.rax);
+        self.set_reg(Register::Rsp,    self.vmcb().state.rsp);
+        self.set_reg(Register::Rip,    self.vmcb().state.rip);
+        self.set_reg(Register::Rflags, self.vmcb().state.rflags);
     }
 
     #[allow(unused)]
     pub fn cpl(&self) -> u8 {
-        self.guest_vmcb.state.cpl
+        self.vmcb().state.cpl
     }
 }

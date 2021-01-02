@@ -116,10 +116,13 @@ pub unsafe fn initialize() {
     vm.set_reg(Register::Rsp,    rsp);
     vm.set_reg(Register::Rflags, 2);
 
+    //let mut page_table = PageTable::new();
+
     let vmcb = vm.vmcb_mut();
     vmcb.control.intercept_misc_2 = 1 | 2;
     vmcb.control.intercept_misc_1 = 1 << 31;
     vmcb.control.intercept_exceptions = 0b11111111111;
+    //vmcb.control.np_control = 1;
     vmcb.control.guest_asid = 1;
 
     vm.run();

@@ -126,7 +126,8 @@ fn create_kernel_stack() -> u64 {
     let stack = VirtAddr(*next_stack_address);
 
     // Map the stack to the kernel address space.
-    page_table.map(&mut PhysicalMemory, stack, PageType::Page4K, KERNEL_STACK_SIZE, true, false)
+    page_table.map(&mut PhysicalMemory, stack, PageType::Page4K, KERNEL_STACK_SIZE,
+                   true, false, false)
         .expect("Failed to map kernel stack.");
 
     // Update stack address which will be used by the next AP.
@@ -207,7 +208,7 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
         // Map the segment with correct permissions using standard 4K pages.
         // If some segments overlap, this routine will return an error.
         kernel_page_table.map_init(&mut PhysicalMemory, virt_addr, PageType::Page4K, virt_size,
-                                   segment.write, segment.execute,
+                                   segment.write, segment.execute, false,
                                    Some(|offset: u64| {
                                        // Get a byte for given segment offset. Because we have
                                        // possibly changed segment start address,

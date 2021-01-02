@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use core::ops::{Deref, DerefMut};
 use core::marker::PhantomData;
 
+use rangeset::Range;
 use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
                  PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE, PAGE_PAT, PAGE_PWT};
 use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
@@ -21,6 +22,19 @@ impl PhysMem for PhysicalMemory {
         unsafe {
             alloc_phys(core!().boot_block, layout)
         }
+    }
+
+    unsafe fn free_phys(&mut self, phys_addr: PhysAddr, size: usize) -> Option<()> {
+        let mut free_memory = core!().boot_block.free_memory.lock();
+        let free_memory     = free_memory.as_mut().unwrap();
+
+        free_memory.insert(Range {
+            start: phys_addr.0,
+            end:   phys_addr.0 + (size as u64).checked_sub(1)
+                .expect("Zero sized types are not suported.")
+        });
+
+        Some(())
     }
 }
 
@@ -278,7 +292,7 @@ impl FreeList {
 
             // Map new memory region as readable and writable.
             page_table.map(&mut PhysicalMemory, virt_addr, PageType::Page4K,
-                           actual_size as u64, true, false)
+                           actual_size as u64, true, false, false)
                 .expect("Failed to map heap memory.");
 
             if actual_size != self.size {

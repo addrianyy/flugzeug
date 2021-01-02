@@ -48,7 +48,8 @@ fn create_kernel_stack() -> u64 {
     // It is possible that this page table contains some physical addresses > 4GB that we cannot
     // access. This is fine, as this area of virtual memory is used only by the bootloader
     // so it won't contain these addesses.
-    page_table.map(&mut PhysicalMemory, stack, PageType::Page4K, KERNEL_STACK_SIZE, true, false)
+    page_table.map(&mut PhysicalMemory, stack, PageType::Page4K, KERNEL_STACK_SIZE,
+                   true, false, false)
         .expect("Failed to map kernel stack.");
 
     // Update stack address which will be used by the next AP.
@@ -169,6 +170,7 @@ fn create_kernel_page_table(kernel: &Elf, page_type: PageType) -> PageTable {
             virt_size,
             segment.write,
             segment.execute,
+            false,
             Some(|offset: u64| {
                 // Get a byte for given segment offset. Because we have
                 // possibly changed segment start address,
