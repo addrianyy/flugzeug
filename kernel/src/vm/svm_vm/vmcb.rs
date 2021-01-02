@@ -12,13 +12,9 @@ pub struct VmcbSegmentDescriptor {
 
 #[repr(C)]
 pub struct VmcbControlArea {
-    pub intercept_cr_reads:  u16,
-    pub intercept_cr_writes: u16,
-    pub intercept_dr_reads:  u16,
-    pub intercept_dr_writes: u16,
-
-    pub intercept_exceptions: u32,
-
+    pub intercept_cr_rw:           u32,
+    pub intercept_dr_rw:           u32,
+    pub intercept_exceptions:      u32,
     pub intercept_misc_1:          u32,
     pub intercept_misc_2:          u32,
     pub intercept_misc_3:          u32,

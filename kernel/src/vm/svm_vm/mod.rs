@@ -136,33 +136,12 @@ impl Segment {
     }
 }
 
-// Don't change the numbers.
-#[allow(unused)]
-#[repr(usize)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Exception {
-    De = 0,
-    Db = 1,
-    Bp = 3,
-    Of = 4,
-    Br = 5,
-    Ud = 6,
-    Nm = 7,
-    Df = 8,
-    Ts = 10,
-    Np = 11,
-    Ss = 12,
-    Gp = 13,
-    Pf = 14,
-    Mf = 16,
-    Ac = 17,
-    Mc = 18,
-    Xf = 19,
-}
-
 const MISC_1: usize = 1 << 8;
 const MISC_2: usize = 2 << 8;
 const MISC_3: usize = 3 << 8;
+const CR_RW:  usize = 4 << 8;
+const DR_RW:  usize = 5 << 8;
+const EXC:    usize = 6 << 8;
 
 // Don't change the numbers.
 #[allow(unused)]
@@ -222,6 +201,48 @@ pub enum Intercept {
     Pcid           = MISC_3 | 2,
     Mcommit        = MISC_3 | 3,
     // Skipped TLBSYNC - not always supported. Always off.
+
+    Cr0Read  = CR_RW | (0  + 0),
+    Cr2Read  = CR_RW | (0  + 2),
+    Cr3Read  = CR_RW | (0  + 3),
+    Cr4Read  = CR_RW | (0  + 4),
+    Cr8Read  = CR_RW | (0  + 8),
+    Cr0Write = CR_RW | (16 + 0),
+    Cr2Write = CR_RW | (16 + 2),
+    Cr3Write = CR_RW | (16 + 3),
+    Cr4Write = CR_RW | (16 + 4),
+    Cr8Write = CR_RW | (16 + 8),
+
+    Dr0Read  = DR_RW | (0  + 0),
+    Dr1Read  = DR_RW | (0  + 1),
+    Dr2Read  = DR_RW | (0  + 2),
+    Dr3Read  = DR_RW | (0  + 3),
+    Dr6Read  = DR_RW | (0  + 6),
+    Dr7Read  = DR_RW | (0  + 7),
+    Dr0Write = DR_RW | (16 + 0),
+    Dr1Write = DR_RW | (16 + 1),
+    Dr2Write = DR_RW | (16 + 2),
+    Dr3Write = DR_RW | (16 + 3),
+    Dr6Write = DR_RW | (16 + 6),
+    Dr7Write = DR_RW | (16 + 7),
+
+    De = EXC | 0,
+    Db = EXC | 1,
+    Bp = EXC | 3,
+    Of = EXC | 4,
+    Br = EXC | 5,
+    Ud = EXC | 6,
+    Nm = EXC | 7,
+    Df = EXC | 8,
+    Ts = EXC | 10,
+    Np = EXC | 11,
+    Ss = EXC | 12,
+    Gp = EXC | 13,
+    Pf = EXC | 14,
+    Mf = EXC | 16,
+    Ac = EXC | 17,
+    Mc = EXC | 18,
+    Xf = EXC | 19,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -335,22 +356,18 @@ impl Vm {
 
             // Pick the misc field for this intercept.
             let control = &mut self.vmcb_mut().control;
-            let field   = match intercept >> 8 {
-                1 => &mut control.intercept_misc_1,
-                2 => &mut control.intercept_misc_2,
-                3 => &mut control.intercept_misc_3,
+            let field   = match intercept & !0xff {
+                MISC_1 => &mut control.intercept_misc_1,
+                MISC_2 => &mut control.intercept_misc_2,
+                MISC_3 => &mut control.intercept_misc_3,
+                CR_RW  => &mut control.intercept_cr_rw,
+                DR_RW  => &mut control.intercept_dr_rw,
+                EXC    => &mut control.intercept_exceptions,
                 _ => panic!("Invalid intercept encoding."),
             };
 
-            // Set intercept bit.
+            // Set the intercept bit.
             *field |= (1 << (intercept & 0xff));
-        }
-    }
-
-    #[allow(unused)]
-    pub fn intercept_exceptions(&mut self, exceptions: &[Exception]) {
-        for &exception in exceptions {
-            self.vmcb_mut().control.intercept_exceptions |= (1 << exception as u32);
         }
     }
 
