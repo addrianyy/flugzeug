@@ -1,4 +1,5 @@
-use page_table::{PageTable, PageType, PhysAddr, VirtAddr};
+pub use page_table::{PageTable, PageType, PhysAddr, VirtAddr};
+
 use crate::mm;
 
 #[allow(unused)] pub const NPT_PRESENT: u64 = page_table::PAGE_PRESENT;
@@ -17,7 +18,7 @@ impl Npt {
     pub(super) fn new() -> Self {
         Self {
             page_table: PageTable::new(&mut mm::PhysicalMemory)
-                .expect("Failed to allocate NPT for VM."),
+                .expect("Failed to allocate NPT for the VM."),
         }
     }
 

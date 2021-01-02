@@ -1,10 +1,8 @@
 mod svm;
 
 use svm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable,
-             Segment, VmExit, Intercept};
-use svm::npt::{self, GuestAddr};
-
-use page_table::PageType;
+          Segment, VmExit, Intercept};
+use svm::npt::{self, GuestAddr, PageType};
 
 fn load_segment(vm: &mut Vm, register: SegmentRegister, selector: u16) {
     // Make sure that selector's table bit is 0.

@@ -21,22 +21,22 @@ impl Vm {
             }
 
             create_match!(
-                Efer,           efer,
-                Cr0,            cr0,
-                Cr2,            cr2,
-                Cr3,            cr3,
-                Cr4,            cr4,
-                Dr6,            dr6,
-                Dr7,            dr7,
-                Star,           star,
-                Lstar,          lstar,
-                Cstar,          cstar,
-                Sfmask,         sfmask,
-                KernelGsBase,   kernel_gs_base,
-                SysenterCs,     sysenter_cs,
-                SysenterEsp,    sysenter_esp,
-                SysenterEip,    sysenter_eip,
-                Pat,            g_pat
+                Efer,         efer,
+                Cr0,          cr0,
+                Cr2,          cr2,
+                Cr3,          cr3,
+                Cr4,          cr4,
+                Dr6,          dr6,
+                Dr7,          dr7,
+                Star,         star,
+                Lstar,        lstar,
+                Cstar,        cstar,
+                Sfmask,       sfmask,
+                KernelGsBase, kernel_gs_base,
+                SysenterCs,   sysenter_cs,
+                SysenterEsp,  sysenter_esp,
+                SysenterEip,  sysenter_eip,
+                Pat,          g_pat
             )
         }
     }
@@ -61,22 +61,22 @@ impl Vm {
             }
 
             create_match!(
-                Efer,           efer,
-                Cr0,            cr0,
-                Cr2,            cr2,
-                Cr3,            cr3,
-                Cr4,            cr4,
-                Dr6,            dr6,
-                Dr7,            dr7,
-                Star,           star,
-                Lstar,          lstar,
-                Cstar,          cstar,
-                Sfmask,         sfmask,
-                KernelGsBase,   kernel_gs_base,
-                SysenterCs,     sysenter_cs,
-                SysenterEsp,    sysenter_esp,
-                SysenterEip,    sysenter_eip,
-                Pat,            g_pat
+                Efer,         efer,
+                Cr0,          cr0,
+                Cr2,          cr2,
+                Cr3,          cr3,
+                Cr4,          cr4,
+                Dr6,          dr6,
+                Dr7,          dr7,
+                Star,         star,
+                Lstar,        lstar,
+                Cstar,        cstar,
+                Sfmask,       sfmask,
+                KernelGsBase, kernel_gs_base,
+                SysenterCs,   sysenter_cs,
+                SysenterEsp,  sysenter_esp,
+                SysenterEip,  sysenter_eip,
+                Pat,          g_pat
             );
         }
     }

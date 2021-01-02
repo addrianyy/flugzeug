@@ -7,13 +7,11 @@ use core::fmt;
 
 use crate::mm::PhysicalPage;
 
-use page_table::VirtAddr;
-
 use utils::{XsaveArea, SvmFeatures, Asid};
 use vmcb::Vmcb;
-use npt::{Npt, GuestAddr};
+use npt::{Npt, GuestAddr, VirtAddr};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum VmError {
     NonAmdCpu,
     SvmNotSupported,
@@ -37,6 +35,12 @@ impl VmError {
 }
 
 impl fmt::Display for VmError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
+impl fmt::Debug for VmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_string())
     }
@@ -177,7 +181,7 @@ pub enum Intercept {
     Hlt       = MISC_1 | 24,
     Invlpg    = MISC_1 | 25,
     Invlpga   = MISC_1 | 26,
-    // Skipped IOIO_PROT and MSR_PROT - exposed by different API.
+    // Skipped IOIO_PROT and MSR_PROT - exposed by the different API.
     // Skipped task switches and FERR_FREEZE - always off.
     // Skipped shutdown events - always on.
 
