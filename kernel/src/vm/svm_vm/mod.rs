@@ -1,3 +1,4 @@
+pub mod npt;
 mod vmcb;
 mod accessors;
 
@@ -7,6 +8,7 @@ use core::fmt;
 use crate::mm::{self, PhysicalPage};
 
 use vmcb::Vmcb;
+use npt::Npt;
 
 const VM_CR_MSR:       u32 = 0xc001_0114;
 const VM_HSAVE_PA_MSR: u32 = 0xc001_0117;
@@ -227,6 +229,9 @@ pub struct Vm {
 
     /// Basic register state for the guest. Contains all GPRs, RIP and RFLAGS.
     guest_registers: [u64; 18],
+
+    /// Nested page tables for the guest.
+    npt: Npt,
 }
 
 impl Vm {
@@ -234,7 +239,7 @@ impl Vm {
         // This VM requires AMD SVM so enable it first.
         enable_svm()?;
 
-        Ok(Self {
+        let mut vm = Self {
             guest_vmcb:  Vmcb::new(),
             guest_xsave: XsaveArea::new(),
 
@@ -242,15 +247,41 @@ impl Vm {
             host_xsave: XsaveArea::new(),
 
             guest_registers: [0; 18],
-        })
+            npt:             Npt::new(),
+        };
+
+        vm.initialize();
+
+        Ok(vm)
     }
 
+    fn initialize(&mut self) {
+        let n_cr3   = self.npt.table().0;
+        let control = &mut self.vmcb_mut().control;
+
+        // Enable nested paging and set nested page table CR3.
+        control.np_control = 1;
+        control.n_cr3      = n_cr3;
+    }
+
+    #[allow(unused)]
     pub fn vmcb(&self) -> &Vmcb {
         &self.guest_vmcb
     }
 
+    #[allow(unused)]
     pub fn vmcb_mut(&mut self) -> &mut Vmcb {
         &mut self.guest_vmcb
+    }
+
+    #[allow(unused)]
+    pub fn npt(&self) -> &Npt {
+        &self.npt
+    }
+
+    #[allow(unused)]
+    pub fn npt_mut(&mut self) -> &mut Npt {
+        &mut self.npt
     }
 
     pub unsafe fn run(&mut self) {

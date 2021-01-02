@@ -115,6 +115,7 @@ impl PageTable {
     }
 
     /// Map region at `virt_addr` with size `size`. Mapped region will be zeroed.
+    #[must_use]
     pub fn map(
         &mut self,
         phys_mem:  &mut impl PhysMem,
@@ -132,6 +133,7 @@ impl PageTable {
     /// Map region at `virt_addr` with size `size`. `init` function is used to initialize
     /// memory contents of the new region.
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn map_init(
         &mut self,
         phys_mem:  &mut impl PhysMem,
@@ -197,6 +199,7 @@ impl PageTable {
     }
 
     /// Set page table entry value that describes `virt_addr` to `raw`.
+    #[must_use]
     pub unsafe fn map_raw(
         &mut self,
         phys_mem:  &mut impl PhysMem,
@@ -211,6 +214,7 @@ impl PageTable {
 
     /// Set page table entry value that describes `virt_addr` to `raw`. If `deallocate` flag
     /// is set then backing memory will be deallocated when destroying page table.
+    #[must_use]
     unsafe fn map_raw_internal(
         &mut self,
         phys_mem:   &mut impl PhysMem,
@@ -226,6 +230,11 @@ impl PageTable {
 
         if deallocate {
             raw |= DEALLOCATE_FLAG;
+        }
+
+        // If we are using large pages we need to set `PAGE_SIZE` bit in the page table entry.
+        if page_type != PageType::Page4K {
+            raw |= PAGE_SIZE;
         }
 
         if !virt_addr.is_canonical() {
@@ -323,6 +332,7 @@ impl PageTable {
         unreachable!()
     }
 
+    #[must_use]
     pub fn virt_to_phys(
         &self,
         phys_mem:  &mut impl PhysMem,
@@ -378,10 +388,12 @@ impl PageTable {
         unreachable!()
     }
 
+    #[must_use]
     pub unsafe fn destroy(&mut self, phys_mem: &mut impl PhysMem) -> Option<()> {
         Self::destroy_level(phys_mem, 0, self.table.0 & 0xffffffffff000)
     }
 
+    #[must_use]
     unsafe fn destroy_level(phys_mem: &mut impl PhysMem, depth: usize, table: u64) -> Option<()> {
         let table_phys = PhysAddr(table);
         let table      = phys_mem.translate(table_phys, 4096)? as *mut u64;
@@ -413,7 +425,7 @@ impl PageTable {
                     phys_mem.free_phys(PhysAddr(backing), page_size)?;
                 }
             } else {
-                Self::destroy_level(phys_mem, depth + 1, backing);
+                Self::destroy_level(phys_mem, depth + 1, backing)?;
             }
 
             *entry_ptr = 0;

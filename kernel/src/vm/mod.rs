@@ -1,6 +1,7 @@
 mod svm_vm;
 
 use svm_vm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable, Segment};
+use svm_vm::npt::{self, GuestAddr};
 
 fn load_segment(vm: &mut Vm, register: SegmentRegister, selector: u16) {
     // Make sure that selector's table bit is 0.
@@ -66,6 +67,7 @@ pub unsafe fn initialize() {
     let mut vm = Vm::new()
         .expect("Failed to create virtual machine.");
 
+    // Allocate stack for the guest.
     let mut stack = alloc::vec![0u8; 1024 * 1024];
     let rsp       = (stack.as_mut_ptr() as u64) + (stack.len() as u64);
     let rsp       = (rsp & !0xf) - 0x100;
@@ -95,6 +97,7 @@ pub unsafe fn initialize() {
         }
     });
 
+    // Setup register state for the VM.
     vm.set_reg(Register::Efer,         cpu::rdmsr(0xc000_0080));
     vm.set_reg(Register::Cr0,          cpu::get_cr0() as u64);
     vm.set_reg(Register::Cr2,          0);
@@ -111,18 +114,29 @@ pub unsafe fn initialize() {
     vm.set_reg(Register::Pat,          cpu::rdmsr(0x277));
     vm.set_reg(Register::Dr6,          0xffff_0ff0);
     vm.set_reg(Register::Dr7,          0x0000_0400);
+    vm.set_reg(Register::Rip,          guest_entrypoint as *const () as u64);
+    vm.set_reg(Register::Rsp,          rsp);
+    vm.set_reg(Register::Rflags,       2);
 
-    vm.set_reg(Register::Rip,    guest_entrypoint as *const () as u64);
-    vm.set_reg(Register::Rsp,    rsp);
-    vm.set_reg(Register::Rflags, 2);
+    // Map whole physical memory to the guest.
+    {
+        let map_size  = crate::mm::KERNEL_PHYSICAL_REGION_SIZE;
+        let page_type = core!().max_page_type;
+        let page_size = page_type as u64;
 
-    //let mut page_table = PageTable::new();
+        for phys_addr in (0..map_size).step_by(page_size as usize) {
+            let guest_addr = GuestAddr(phys_addr);
+            let raw        = phys_addr | npt::NPT_PRESENT | npt::NPT_WRITE;
+
+            vm.npt_mut().map_raw(guest_addr, page_type, raw, true, false);
+        }
+    }
 
     let vmcb = vm.vmcb_mut();
     vmcb.control.intercept_misc_2 = 1 | 2;
     vmcb.control.intercept_misc_1 = 1 << 31;
     vmcb.control.intercept_exceptions = 0b11111111111;
-    //vmcb.control.np_control = 1;
+    vmcb.control.np_control = 1;
     vmcb.control.guest_asid = 1;
 
     vm.run();

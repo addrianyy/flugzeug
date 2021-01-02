@@ -6,8 +6,8 @@ use core::marker::PhantomData;
 use rangeset::Range;
 use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
                  PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE, PAGE_PAT, PAGE_PWT};
-use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
-                 KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING, BootBlock};
+use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_HEAP_BASE, KERNEL_HEAP_PADDING};
+pub use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_SIZE};
 
 pub const MAX_ACCESSIBLE_PHYSICAL_ADDRESS: u64 = KERNEL_PHYSICAL_REGION_SIZE - 1;
 

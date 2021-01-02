@@ -2,13 +2,12 @@ use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use core::alloc::Layout;
 use core::alloc::GlobalAlloc;
 
-use boot_block::BootBlock;
-use page_table::PhysAddr;
+use page_table::{PhysAddr, PageType};
 use lock::Lock;
 
 use crate::interrupts::Interrupts;
 use crate::apic::{Apic, ApicMode};
-use crate::mm::{self, FreeList, PhysicalPage};
+use crate::mm::{self, FreeList, PhysicalPage, BootBlock};
 
 static NEXT_FREE_CORE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -49,6 +48,9 @@ pub struct CoreLocals {
 
     /// Required size of the XSAVE area.
     xsave_size: AtomicUsize,
+
+    /// Biggest page type supported on the system.
+    pub max_page_type: PageType,
 
     /// Unique identifier for this CPU. 0 is BSP.
     pub id: u64,
@@ -184,6 +186,17 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
         virt_addr.0 as usize
     };
 
+    let features = cpu::get_features();
+
+    // Determine biggest supported page type.
+    let max_page_type = if features.page1g {
+        PageType::Page1G
+    } else if features.page2m {
+        PageType::Page2M
+    } else {
+        panic!("System doesn't support 2M or 1G pages.");
+    };
+
     let core_locals = CoreLocals {
         boot_tsc,
         self_address:   core_locals_ptr,
@@ -195,6 +208,7 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
         interrupts:     Lock::new(None),
         host_save_area: Lock::new(None),
         boot_block,
+        max_page_type,
         free_lists: [
             Lock::new(FreeList::new(0x0000000000000008)),
             Lock::new(FreeList::new(0x0000000000000010)),
