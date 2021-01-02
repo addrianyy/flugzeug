@@ -3,7 +3,7 @@ use core::mem::MaybeUninit;
 use crate::mm::PhysicalPage;
 
 #[repr(C)]
-pub(super) struct VmcbSegmentDescriptor {
+pub struct VmcbSegmentDescriptor {
     pub selector: u16,
     pub attrib:   u16,
     pub limit:    u32,
@@ -12,11 +12,13 @@ pub(super) struct VmcbSegmentDescriptor {
 
 #[repr(C)]
 pub struct VmcbControlArea {
-    pub intercept_cr_reads:        u16,
-    pub intercept_cr_writes:       u16,
-    pub intercept_dr_reads:        u16,
-    pub intercept_dr_writes:       u16,
-    pub intercept_exceptions:      u32,
+    pub intercept_cr_reads:  u16,
+    pub intercept_cr_writes: u16,
+    pub intercept_dr_reads:  u16,
+    pub intercept_dr_writes: u16,
+
+    pub intercept_exceptions: u32,
+
     pub intercept_misc_1:          u32,
     pub intercept_misc_2:          u32,
     pub intercept_misc_3:          u32,
@@ -54,7 +56,7 @@ pub struct VmcbControlArea {
 }
 
 #[repr(C)]
-pub(super) struct VmcbStateSaveArea {
+pub struct VmcbStateSaveArea {
     // Guest segment registers.
     pub es:   VmcbSegmentDescriptor,
     pub cs:   VmcbSegmentDescriptor,
@@ -135,12 +137,12 @@ pub(super) struct VmcbStateSaveArea {
 
 #[repr(C)]
 pub struct Vmcb {
-    pub        control: VmcbControlArea,
-    pub(super) state:   VmcbStateSaveArea,
+    pub control: VmcbControlArea,
+    pub state:   VmcbStateSaveArea,
 }
 
 impl Vmcb {
-    pub(super) fn new() -> PhysicalPage<Vmcb> {
+    pub fn new() -> PhysicalPage<Vmcb> {
         // Make sure that all VMCB components have expected sizes.
         assert_eq!(core::mem::size_of::<VmcbControlArea>(), 0x400,
                    "Invalid size of VMCB control area.");

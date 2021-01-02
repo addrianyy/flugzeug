@@ -1,7 +1,10 @@
 mod svm_vm;
 
-use svm_vm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable, Segment};
+use svm_vm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable, Segment, VmExit,
+             Intercept, Exception};
 use svm_vm::npt::{self, GuestAddr};
+
+use page_table::PageType;
 
 fn load_segment(vm: &mut Vm, register: SegmentRegister, selector: u16) {
     // Make sure that selector's table bit is 0.
@@ -118,31 +121,41 @@ pub unsafe fn initialize() {
     vm.set_reg(Register::Rsp,          rsp);
     vm.set_reg(Register::Rflags,       2);
 
-    // Map whole physical memory to the guest.
-    {
-        let map_size  = crate::mm::KERNEL_PHYSICAL_REGION_SIZE;
-        let page_type = core!().max_page_type;
-        let page_size = page_type as u64;
+    vm.intercept(&[Intercept::Vmmcall, Intercept::Hlt]);
+    vm.intercept_exceptions(&[Exception::Bp]);
 
-        for phys_addr in (0..map_size).step_by(page_size as usize) {
-            let guest_addr = GuestAddr(phys_addr);
-            let raw        = phys_addr | npt::NPT_PRESENT | npt::NPT_WRITE;
+    let mut mapped_pages = 0;
 
-            vm.npt_mut().map_raw(guest_addr, page_type, raw, true, false);
+    'run: loop {
+        let exit = vm.run();
+
+        match exit {
+            VmExit::NestedPageFault { address, .. } => {
+                let phys_addr = address.0 & !0xfff;
+                let raw       = phys_addr | npt::NPT_PRESENT | npt::NPT_WRITE;
+
+                vm.npt_mut().map_raw(GuestAddr(phys_addr), PageType::Page4K,
+                                     raw, true, false);
+
+                mapped_pages += 1;
+
+                continue 'run;
+            }
+            VmExit::Vmmcall => {
+                println!("vmmcall: {:#x}.", vm.reg(Register::Rax));
+
+                vm.set_reg(Register::Rip, vm.next_rip());
+
+                continue 'run;
+            }
+            VmExit::Hlt => {}
+            _           => panic!("Unhandled VM exit {:x?}.", exit),
         }
+
+        break 'run;
     }
 
-    let vmcb = vm.vmcb_mut();
-    vmcb.control.intercept_misc_2 = 1 | 2;
-    vmcb.control.intercept_misc_1 = 1 << 31;
-    vmcb.control.intercept_exceptions = 0b11111111111;
-    vmcb.control.np_control = 1;
-    vmcb.control.guest_asid = 1;
-
-    vm.run();
-
-    println!("Exit reason: 0x{:x}.", vm.vmcb().control.exitcode);
-    println!("Running at CPL {}", vm.cpl());
+    println!("Done! Mapped in {} pages.", mapped_pages);
 }
 
 unsafe fn guest_entrypoint() -> ! {

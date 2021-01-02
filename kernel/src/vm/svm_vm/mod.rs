@@ -1,32 +1,35 @@
 pub mod npt;
 mod vmcb;
+mod utils;
 mod accessors;
 
-use core::alloc::{GlobalAlloc, Layout};
 use core::fmt;
 
-use crate::mm::{self, PhysicalPage};
+use crate::mm::PhysicalPage;
 
+use utils::{XsaveArea, SvmFeatures, Asid};
 use vmcb::Vmcb;
-use npt::Npt;
-
-const VM_CR_MSR:       u32 = 0xc001_0114;
-const VM_HSAVE_PA_MSR: u32 = 0xc001_0117;
-const EFER_MSR:        u32 = 0xc000_0080;
+use npt::{Npt, GuestAddr};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum VmError {
     NonAmdCpu,
     SvmNotSupported,
     SvmDisabled,
+    OutOfAsids,
+    NPNotSupported,
+    NRipSaveNotSupported,
 }
 
 impl VmError {
     fn to_string(&self) -> &'static str {
         match self {
-            VmError::NonAmdCpu       => "CPU vendor is not `AuthenticAMD`.",
-            VmError::SvmNotSupported => "CPUID reported that SVM is not supported.",
-            VmError::SvmDisabled     => "SVM is disabled by the BIOS.",
+            VmError::NonAmdCpu            => "CPU vendor is not `AuthenticAMD`.",
+            VmError::SvmNotSupported      => "CPUID reported that SVM is not supported.",
+            VmError::SvmDisabled          => "SVM is disabled by the BIOS.",
+            VmError::OutOfAsids           => "Couldn't assign unique ASID for this VM.",
+            VmError::NPNotSupported       => "SVM nested paging is not supported.",
+            VmError::NRipSaveNotSupported => "Next RIP saving is not supported.",
         }
     }
 }
@@ -37,90 +40,7 @@ impl fmt::Display for VmError {
     }
 }
 
-fn enable_svm() -> Result<(), VmError> {
-    // If host save area is allocated than SVM is already enabled on this processor.
-    if core!().host_save_area.lock().is_some() {
-        return Ok(());
-    }
-
-    {
-        let cpuid      = cpu::cpuid(0, 0);
-        let mut vendor = [0u8; 3 * 4];
-
-        vendor[0.. 4].copy_from_slice(&cpuid.ebx.to_le_bytes());
-        vendor[4.. 8].copy_from_slice(&cpuid.edx.to_le_bytes());
-        vendor[8..12].copy_from_slice(&cpuid.ecx.to_le_bytes());
-
-        if &vendor != b"AuthenticAMD" {
-            return Err(VmError::NonAmdCpu);
-        }
-    }
-
-    if !cpu::get_features().svm {
-        return Err(VmError::SvmNotSupported);
-    }
-
-    let svm_cr = unsafe { cpu::rdmsr(VM_CR_MSR) };
-    if  svm_cr & (1 << 4) != 0 {
-        return Err(VmError::SvmDisabled);
-    }
-
-    // Allocate area used by the SVM to store host state on `vmrun`.
-    let host_save_area = PhysicalPage::new([0u8; 4096]);
-
-    unsafe {
-        // Enable SVM.
-        cpu::wrmsr(EFER_MSR, cpu::rdmsr(EFER_MSR) | (1 << 12));
-
-        // Set physical address of the host save area.
-        cpu::wrmsr(VM_HSAVE_PA_MSR, host_save_area.phys_addr().0);
-    }
-
-    // Store host save area in core locals.
-    *core!().host_save_area.lock() = Some(host_save_area);
-
-    Ok(())
-}
-
-struct XsaveArea {
-    pointer: *mut u8,
-}
-
-impl XsaveArea {
-    fn new() -> Self {
-        unsafe {
-            // Allocate the XSAVE area with appropriate size and alignment.
-            let xsave_size   = core!().xsave_size();
-            let xsave_layout = Layout::from_size_align(xsave_size, 64)
-                .expect("Failed to create XSAVE layout.");
-            let xsave_area   = mm::GLOBAL_ALLOCATOR.alloc(xsave_layout);
-
-            assert!(!xsave_area.is_null(), "Failed to allocate XSAVE area.");
-
-            // Zero out XSAVE area as required by the architecture.
-            core::ptr::write_bytes(xsave_area, 0, xsave_size);
-
-            Self {
-                pointer: xsave_area,
-            }
-        }
-    }
-}
-
-impl Drop for XsaveArea {
-    fn drop(&mut self) {
-        unsafe {
-            let xsave_size   = core!().xsave_size();
-            let xsave_layout = Layout::from_size_align(xsave_size, 64)
-                .expect("Failed to create XSAVE layout.");
-
-            // Free the XSAVE area.
-            mm::GLOBAL_ALLOCATOR.dealloc(self.pointer, xsave_layout);
-        }
-    }
-}
-
-// Don't change the numbers without changing assembly in `Vm::run()`.
+// Don't change the numbers.
 #[allow(unused)]
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -216,6 +136,107 @@ impl Segment {
     }
 }
 
+// Don't change the numbers.
+#[allow(unused)]
+#[repr(usize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Exception {
+    De = 0,
+    Db = 1,
+    Bp = 3,
+    Of = 4,
+    Br = 5,
+    Ud = 6,
+    Nm = 7,
+    Df = 8,
+    Ts = 10,
+    Np = 11,
+    Ss = 12,
+    Gp = 13,
+    Pf = 14,
+    Mf = 16,
+    Ac = 17,
+    Mc = 18,
+    Xf = 19,
+}
+
+const MISC_1: usize = 1 << 8;
+const MISC_2: usize = 2 << 8;
+const MISC_3: usize = 3 << 8;
+
+// Don't change the numbers.
+#[allow(unused)]
+#[repr(usize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Intercept {
+    Intr      = MISC_1 | 0,
+    Nmi       = MISC_1 | 1,
+    Smi       = MISC_1 | 2,
+    Init      = MISC_1 | 3,
+    Vintr     = MISC_1 | 4,
+    // Skipped "Intercept CR0 writes that change bits other than CR0.TS or CR0.MP." - always off.
+    IdtrRead  = MISC_1 | 6,
+    GdtrRead  = MISC_1 | 7,
+    LdtrRead  = MISC_1 | 8,
+    TrRead    = MISC_1 | 9,
+    IdtrWrite = MISC_1 | 10,
+    GdtrWrite = MISC_1 | 11,
+    LdtrWrite = MISC_1 | 12,
+    TrWrite   = MISC_1 | 13,
+    Rdtsc     = MISC_1 | 14,
+    Rdpmc     = MISC_1 | 15,
+    Pushf     = MISC_1 | 16,
+    Popf      = MISC_1 | 17,
+    Cpuid     = MISC_1 | 18,
+    Rsm       = MISC_1 | 19,
+    Iret      = MISC_1 | 20,
+    Int       = MISC_1 | 21,
+    Invd      = MISC_1 | 22,
+    Pause     = MISC_1 | 23,
+    Hlt       = MISC_1 | 24,
+    Invlpg    = MISC_1 | 25,
+    Invlpga   = MISC_1 | 26,
+    // Skipped IOIO_PROT and MSR_PROT - exposed by different API.
+    // Skipped task switches and FERR_FREEZE - always off.
+    // Skipped shutdown events - always on.
+
+    // Skipped VMRUN - always on.
+    Vmmcall = MISC_2 | 1,
+    Vmload  = MISC_2 | 2,
+    Vmsave  = MISC_2 | 3,
+    Stgi    = MISC_2 | 4,
+    Clgi    = MISC_2 | 5,
+    Skinit  = MISC_2 | 6,
+    Rdtscp  = MISC_2 | 7,
+    Icebp   = MISC_2 | 8,
+    Wbindvd = MISC_2 | 9,
+    Monitor = MISC_2 | 10,
+    Mwait   = MISC_2 | 11,
+    // Skipped "Intercept MWAIT/MWAITX instruction if monitor hardware is armed" - always off.
+    Xsetbv  = MISC_2 | 13,
+    Rdpru   = MISC_2 | 14,
+    // Skipped EFER and CR0-15. Both happen after guest instruction finishes. Always off.
+
+    Invlpgb        = MISC_3 | 0,
+    IllegalInvlpgb = MISC_3 | 1,
+    Pcid           = MISC_3 | 2,
+    Mcommit        = MISC_3 | 3,
+    // Skipped TLBSYNC - not always supported. Always off.
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum VmExit {
+    Vmmcall,
+    Hlt,
+    Shutdown,
+    NestedPageFault {
+        address:  GuestAddr,
+        present:  bool,
+        write:    bool,
+        execute:  bool,
+    },
+}
+
 pub struct Vm {
     /// Guest state. It must be configured by the user of the VM. It is loaded just before
     /// `vmrun` and saved right after.
@@ -232,12 +253,21 @@ pub struct Vm {
 
     /// Nested page tables for the guest.
     npt: Npt,
+
+    /// Unique address space identifier for the guest.
+    asid: Asid,
 }
 
 impl Vm {
     pub fn new() -> Result<Self, VmError> {
         // This VM requires AMD SVM so enable it first.
-        enable_svm()?;
+        utils::enable_svm()?;
+
+        let features = SvmFeatures::get();
+        let asid     = match Asid::new(features.nr_asids) {
+            Some(asid) => asid,
+            None       => return Err(VmError::OutOfAsids),
+        };
 
         let mut vm = Self {
             guest_vmcb:  Vmcb::new(),
@@ -248,30 +278,80 @@ impl Vm {
 
             guest_registers: [0; 18],
             npt:             Npt::new(),
+
+            asid,
         };
 
-        vm.initialize();
+        vm.initialize(&features)?;
 
         Ok(vm)
     }
 
-    fn initialize(&mut self) {
-        let n_cr3   = self.npt.table().0;
+    fn initialize(&mut self, features: &SvmFeatures) -> Result<(), VmError> {
+        // Make sure that all required SVM features are supported.
+        {
+            if !features.nested_paging {
+                return Err(VmError::NPNotSupported);
+            }
+
+            if !features.nrip_save {
+                return Err(VmError::NRipSaveNotSupported);
+            }
+        }
+
+        let n_cr3 = self.npt.table().0;
+        let asid  = self.asid.get();
+
         let control = &mut self.vmcb_mut().control;
 
         // Enable nested paging and set nested page table CR3.
         control.np_control = 1;
         control.n_cr3      = n_cr3;
+
+        // Assign this VM unique ASID.
+        control.guest_asid = asid;
+
+        // Always intercept VMRUN. Without it we cannot run VMs.
+        control.intercept_misc_2 = 1;
+
+        // Always intercept shutdown events. Without it guest triplefault will kill host.
+        control.intercept_misc_1 = 1 << 31;
+
+        Ok(())
     }
 
-    #[allow(unused)]
-    pub fn vmcb(&self) -> &Vmcb {
+    fn vmcb(&self) -> &Vmcb {
         &self.guest_vmcb
     }
 
-    #[allow(unused)]
-    pub fn vmcb_mut(&mut self) -> &mut Vmcb {
+    fn vmcb_mut(&mut self) -> &mut Vmcb {
         &mut self.guest_vmcb
+    }
+
+    #[allow(unused)]
+    pub fn intercept(&mut self, intercepts: &[Intercept]) {
+        for &intercept in intercepts {
+            let intercept = intercept as usize;
+
+            // Pick the misc field for this intercept.
+            let control = &mut self.vmcb_mut().control;
+            let field   = match intercept >> 8 {
+                1 => &mut control.intercept_misc_1,
+                2 => &mut control.intercept_misc_2,
+                3 => &mut control.intercept_misc_3,
+                _ => panic!("Invalid intercept encoding."),
+            };
+
+            // Set intercept bit.
+            *field |= (1 << (intercept & 0xff));
+        }
+    }
+
+    #[allow(unused)]
+    pub fn intercept_exceptions(&mut self, exceptions: &[Exception]) {
+        for &exception in exceptions {
+            self.vmcb_mut().control.intercept_exceptions |= (1 << exception as u32);
+        }
     }
 
     #[allow(unused)]
@@ -284,7 +364,7 @@ impl Vm {
         &mut self.npt
     }
 
-    pub unsafe fn run(&mut self) {
+    pub unsafe fn run(&mut self) -> VmExit {
         // Copy relevant registers from the cache to the VMCB.
         self.vmcb_mut().state.rax    = self.reg(Register::Rax);
         self.vmcb_mut().state.rsp    = self.reg(Register::Rsp);
@@ -410,8 +490,8 @@ impl Vm {
             // Pass pointers required to launch the VM.
             inout("r10") self.guest_vmcb.phys_addr().0     => _,
             inout("r11") self.host_vmcb.phys_addr().0      => _,
-            inout("r12") self.guest_xsave.pointer          => _,
-            inout("r13") self.host_xsave.pointer           => _,
+            inout("r12") self.guest_xsave.pointer()        => _,
+            inout("r13") self.host_xsave.pointer()         => _,
             inout("r14") self.guest_registers.as_mut_ptr() => _,
         );
 
@@ -420,10 +500,43 @@ impl Vm {
         self.set_reg(Register::Rsp,    self.vmcb().state.rsp);
         self.set_reg(Register::Rip,    self.vmcb().state.rip);
         self.set_reg(Register::Rflags, self.vmcb().state.rflags);
+
+        let control     = &self.vmcb().control;
+        let exit_code   = control.exitcode;
+        let exit_info_1 = control.exit_info_1;
+        let exit_info_2 = control.exit_info_2;
+
+        match exit_code {
+            0x78  => VmExit::Hlt,
+            0x7f  => VmExit::Shutdown,
+            0x81  => VmExit::Vmmcall,
+            0x400 => {
+                let address = GuestAddr(exit_info_2);
+                let present  = exit_info_1 & (1 << 0) != 0;
+                let write    = exit_info_1 & (1 << 1) != 0;
+                let reserved = exit_info_1 & (1 << 3) != 0;
+                let execute  = exit_info_1 & (1 << 4) != 0;
+
+                assert!(!reserved, "NPT entry had reserved bits set.");
+
+                VmExit::NestedPageFault {
+                    address,
+                    present,
+                    write,
+                    execute,
+                }
+            }
+            _    => panic!("Unknown VM exit code 0x{:x}.", exit_code),
+        }
     }
 
     #[allow(unused)]
     pub fn cpl(&self) -> u8 {
         self.vmcb().state.cpl
+    }
+
+    #[allow(unused)]
+    pub fn next_rip(&self) -> u64 {
+        self.vmcb().control.next_rip
     }
 }
