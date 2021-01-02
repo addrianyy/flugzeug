@@ -1,8 +1,8 @@
-mod svm;
+mod svm_vm;
 
-use svm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable,
+use svm_vm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable,
              Segment, VmExit, Intercept};
-use svm::npt::{self, GuestAddr};
+use svm_vm::npt::{self, GuestAddr};
 
 use page_table::PageType;
 
