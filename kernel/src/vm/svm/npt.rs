@@ -43,6 +43,24 @@ impl Npt {
                                 raw, add, update)
             .expect("Failed to map memory in the NPT.");
     }
+
+    #[track_caller]
+    pub fn map(
+        &mut self,
+        guest_addr: GuestAddr,
+        page_type:  PageType,
+        size:       u64,
+        write:      bool,
+        exec:       bool,
+    ) {
+        self.page_table.map(&mut mm::PhysicalMemory, VirtAddr(guest_addr.0), page_type,
+                            size, write, exec, true)
+            .expect("Failed to map memory in the NPT.");
+    }
+
+    pub unsafe fn guest_to_host(&self, guest_addr: GuestAddr) -> Option<PhysAddr> {
+        self.page_table.virt_to_phys(&mut mm::PhysicalMemory, VirtAddr(guest_addr.0))
+    }
 }
 
 impl Drop for Npt {
