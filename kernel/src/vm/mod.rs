@@ -235,8 +235,8 @@ struct VKernel {
 impl VKernel {
     fn new() -> Self {
         let image = VKernelImage {
-            base:       0x1337_000_000,
-            entrypoint: 0x1337_000_000,
+            base:       0x13_3700_0000,
+            entrypoint: 0x13_3700_0000,
             image:      alloc::vec![
                 0x49, 0xBF, 0x8F, 0x67, 0x45, 0x23, 0xF1, 0xDE, 0xBC, 0x0A, 0x48, 0xC7, 0xC4,
                 0x00, 0x00, 0x00, 0x0C, 0x5B, 0x48, 0xFF, 0xC3, 0x0F, 0x01, 0xD9,
@@ -305,7 +305,7 @@ impl VKernel {
         self.vm.set_reg(Register::Cr4, (1 << 5) | (1 << 9) | (1 << 10) | (1 << 18));
 
         // Everything WB.
-        self.vm.set_reg(Register::Pat, 0x06060606_06060606);
+        self.vm.set_reg(Register::Pat, 0x0606_0606_0606_0606);
 
         self.vm.set_reg(Register::Cr3,    self.page_table.table().0);
         self.vm.set_reg(Register::Rip,    self.image.entrypoint);
@@ -339,7 +339,7 @@ impl VKernel {
                 // Get page aligned range of the kernel in virtual memory.
                 let kernel_start = self.image.base;
                 let kernel_end   = self.image.base +
-                    (self.image.image.len() as u64 + 0xfff) & !0xfff;
+                    ((self.image.image.len() as u64 + 0xfff) & !0xfff);
 
                 // Check if accessed memory was part of the kernel.
                 if address.0 >= kernel_start && address.0 < kernel_end {

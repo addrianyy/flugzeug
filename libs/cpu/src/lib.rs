@@ -24,9 +24,7 @@ pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
     cpuid
 }
 
-pub fn cpuid_identifier<'a>(start: u32, count: usize, mut buffer: &'a mut [u8])
-    -> Option<&'a str>
-{
+pub fn cpuid_identifier(start: u32, count: usize, mut buffer: &mut [u8]) -> Option<&str> {
     buffer = &mut buffer[..count * 4 * 4];
 
     for (index, chunk) in buffer.chunks_mut(4 * 4).enumerate() {
@@ -45,7 +43,7 @@ pub fn cpuid_identifier<'a>(start: u32, count: usize, mut buffer: &'a mut [u8])
         // This is safe as CPUID identifiers are ASCII only.
         let size = identifier.rfind(|x| !char::is_whitespace(x))
             .map(|index| index + 1)
-            .unwrap_or(identifier.len());
+            .unwrap_or_else(|| identifier.len());
 
         &identifier[..size]
     }).ok();
