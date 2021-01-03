@@ -167,3 +167,13 @@ unsafe fn guest_entrypoint() -> ! {
 
     cpu::halt();
 }
+
+use page_table::PageTable;
+
+struct VKernel {
+    vm:         Vm,
+    page_table: PageTable,
+}
+
+impl VKernel {
+}

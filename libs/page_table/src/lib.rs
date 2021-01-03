@@ -226,7 +226,7 @@ impl PageTable {
         deallocate: bool,
     ) -> Option<()> {
         // Make sure that nobody set the deallocate flag.
-        assert!(raw & DEALLOCATE_FLAG == 0, "Internal flag was set in page table entry.");
+        assert!(raw & DEALLOCATE_FLAG == 0, "Internal flag was set in the page table entry.");
 
         if deallocate {
             raw |= DEALLOCATE_FLAG;
@@ -360,19 +360,18 @@ impl PageTable {
             };
 
             // Given `virt_addr` is not mapped in.
-            if entry & PAGE_PRESENT == 0 {
+            if (entry & PAGE_PRESENT) == 0 {
                 return None;
             }
 
-            let page_mask = if entry & PAGE_SIZE != 0 {
+            let page_mask = if depth == indices.len() - 1 {
+                Some(0xfff)
+            } else if (entry & PAGE_SIZE) != 0 {
                 match depth {
                     1 => Some(0x3fffffff), // 1G page.
                     2 => Some(0x1fffff  ), // 2M page.
                     _ => return None,      // Invalid page table entry.
                 }
-            } else if depth == indices.len() - 1 {
-                // Standard 4K page.
-                Some(0xfff)
             } else {
                 None
             };
@@ -406,14 +405,14 @@ impl PageTable {
                 continue;
             }
 
-            let page_size = if (entry & PAGE_SIZE) != 0 {
+            let page_size = if depth == 3 {
+                Some(4096)
+            } else if (entry & PAGE_SIZE) != 0 {
                 match depth {
                     1 => Some(1024 * 1024 * 1024), // 1G page.
                     2 => Some(2    * 1024 * 1024), // 2M page.
                     _ => return None,              // Invalid page table entry.
                 }
-            } else if depth == 3 {
-                Some(4096)
             } else {
                 None
             };
