@@ -1,3 +1,4 @@
 fn main() {
-    asmlink::build_and_link(&["src/enter_kernel.asm"], "win64");
+    asm::link( &["src/enter_kernel.asm"], asm::Format::Win64);
+    asm::embed(&["src/ap_entrypoint.asm"]);
 }

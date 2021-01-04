@@ -2,19 +2,17 @@ use std::path::{Path, PathBuf};
 use std::io::Write;
 use std::fs;
 
-use crate::build::{ImageBuilder, BuildParameters, build};
+use crate::build::{ImageBuilder, BuildParameters};
 
 pub struct UefiBuilder {
     kernel_path:          PathBuf,
-    bootloader_dir:       PathBuf,
     bootloader_build_dir: PathBuf,
 }
 
 impl ImageBuilder for UefiBuilder {
-    fn new(kernel_path: &Path, bootloader_dir: &Path, bootloader_build_dir: &Path) -> Self {
+    fn new(kernel_path: &Path, _bootloader_dir: &Path, bootloader_build_dir: &Path) -> Self {
         Self {
             kernel_path:          kernel_path.to_owned(),
-            bootloader_dir:       bootloader_dir.to_owned(),
             bootloader_build_dir: bootloader_build_dir.to_owned(),
         }
     }
@@ -27,32 +25,15 @@ impl ImageBuilder for UefiBuilder {
         "flugzeug_uefi"
     }
 
-    fn build_bootloader_dependencies(&mut self) {
-        println!("\nCompiling AP entrypoint...");
-        if !build(
-            "nasm", None,
-            &[
-                make_path!(self.bootloader_dir, "src", "ap_entrypoint.asm"),
-                "-o",
-                make_path!(self.bootloader_build_dir, "ap_entrypoint.bin"),
-            ],
-            &[],
-            "Building bootloader `ap_entrypoint.asm` component failed.",
-        ) {
-            std::process::exit(1);
-        }
-    }
+    fn build_bootloader_dependencies(&mut self) {}
 
     fn bootloader_build_parameters(&mut self) -> BuildParameters {
-        let kernel_path        = make_path!(self.kernel_path).to_owned();
-        let ap_entrypoint_path = make_path!(self.bootloader_build_dir, "ap_entrypoint.bin")
-            .to_owned();
+        let kernel_path = make_path!(self.kernel_path).to_owned();
 
         BuildParameters {
             args: vec![],
             envs: vec![
                 (String::from("FLUGZEUG_KERNEL_PATH"), kernel_path),
-                (String::from("FLUGZEUG_AP_ENTRYPOINT_PATH"), ap_entrypoint_path),
             ],
         }
     }

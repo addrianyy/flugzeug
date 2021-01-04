@@ -2,9 +2,16 @@ use std::collections::HashSet;
 use std::process::Command;
 use std::path::Path;
 
+pub enum Format {
+    Elf32,
+    Elf64,
+    Win32,
+    Win64,
+}
+
 /// Build assembly files specified by `source_files` with format `format` and link them
 /// to the current binary.
-pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
+pub fn link(source_files: &[impl AsRef<Path>], format: Format) {
     // Rust requires us to put all compiled files in the path specified by `OUT_DIR` environment
     // variable.
     let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -12,8 +19,13 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
     // Tell Rust that libraries that we will link to can be found in the `out_dir` path.
     println!("cargo:rustc-link-search={}", out_dir);
 
-    let out_dir    = Path::new(&out_dir);
-    let is_windows = format.contains("win");
+    let out_dir              = Path::new(&out_dir);
+    let (format, is_windows) = match format {
+        Format::Elf32 => ("elf32", false),
+        Format::Elf64 => ("elf64", false),
+        Format::Win32 => ("win32", true),
+        Format::Win64 => ("win64", true),
+    };
 
     let mut compiled_libraries = HashSet::new();
 
@@ -21,22 +33,22 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
     for source_file in source_files {
         let source_file = source_file.as_ref();
 
-        // Get the library name by taking a file name and stripping it's extension.
+        // Get the library name by taking a file name and stripping its extension.
         let libname = source_file.with_extension("");
         let libname = libname.file_name().unwrap().to_str().unwrap();
 
         // Make sure that all libraries have unique names.
         assert!(compiled_libraries.insert(libname.to_owned()),
-            "Some libraries have the same name.");
+                "Some libraries have the same name.");
 
         // Object file will have a name `name.obj`.
         let object_file = out_dir.join(libname).with_extension("obj");
 
         // Convert `Path`s to UTF-8 strings.
-        let source_file  = source_file.to_str().unwrap();
-        let object_file  = object_file.to_str().unwrap();
+        let source_file = source_file.to_str().unwrap();
+        let object_file = object_file.to_str().unwrap();
 
-        // Project needs to be recompiled if source file has changed.
+        // Project needs to be recompiled if the source file has changed.
         println!("cargo:rerun-if-changed={}", source_file);
 
         // Compile `.asm` source to output file with requested format using NASM.
@@ -55,12 +67,12 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
         }
         println!("Done!");
 
-
         if is_windows {
-            // Archive file will have a name `libname.a`.
+            // Library file will have a name `name.lib`.
             let library_file = out_dir.join(libname).with_extension("lib");
             let library_file = library_file.to_str().unwrap();
 
+            // We can't directly link to the object file so we need to make a library file first.
             println!("\nMaking library for {}...", libname);
             let status = Command::new("llvm-lib-10")
                 .args(&[
@@ -96,5 +108,52 @@ pub fn build_and_link(source_files: &[impl AsRef<Path>], format: &str) {
 
         // Link to the newly compiled library.
         println!("cargo:rustc-link-lib=static={}", libname);
+    }
+}
+
+/// Build assembly files as binary files and make them embeddable in the Rust program.
+pub fn embed(source_files: &[impl AsRef<Path>]) {
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let out_dir = Path::new(&out_dir);
+
+    let mut compiled_binaries = HashSet::new();
+
+    // Compile every source assembly file.
+    for source_file in source_files {
+        let source_file = source_file.as_ref();
+
+        // Get the binary name by taking a file name and stripping its extension.
+        let binname = source_file.with_extension("");
+        let binname = binname.file_name().unwrap().to_str().unwrap();
+
+        // Make sure that all binaries have unique names.
+        assert!(compiled_binaries.insert(binname.to_owned()),
+                "Some binaries have the same name.");
+
+        // Binary file will have a name `name.bin`.
+        let binary_file = out_dir.join(binname).with_extension("bin");
+
+        // Convert `Path`s to UTF-8 strings.
+        let source_file = source_file.to_str().unwrap();
+        let binary_file = binary_file.to_str().unwrap();
+
+        // Project needs to be recompiled if the source file has changed.
+        println!("cargo:rerun-if-changed={}", source_file);
+
+        // Compile `.asm` source to output file with binary format using NASM.
+        println!("\nCompiling {}...", binname);
+        let status = Command::new("nasm")
+            .args(&[
+                source_file,
+                "-f", "bin",
+                "-o", binary_file,
+            ])
+            .status()
+            .expect("Failed to invoke `nasm`.");
+
+        if !status.success() {
+            panic!("Failed to compile.");
+        }
+        println!("Done!");
     }
 }

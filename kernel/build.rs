@@ -1,3 +1,3 @@
 fn main() {
-    asmlink::build_and_link(&["src/interrupts.asm"], "elf64");
+    asm::link(&["src/interrupts.asm"], asm::Format::Elf64);
 }

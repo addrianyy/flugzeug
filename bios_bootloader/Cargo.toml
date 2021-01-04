@@ -18,4 +18,4 @@ cpu = { path = "../libs/cpu" }
 bdd = { path = "../libs/bdd" }
 
 [build-dependencies]
-asmlink = { path = "../libs/asmlink" }
+asm = { path = "../libs/asm" }

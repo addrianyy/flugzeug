@@ -5,7 +5,7 @@ name = "acpi"
 version = "0.1.0"
 
 [[package]]
-name = "asmlink"
+name = "asm"
 version = "0.1.0"
 
 [[package]]
@@ -17,7 +17,7 @@ name = "bios_bootloader"
 version = "0.1.0"
 dependencies = [
  "acpi",
- "asmlink",
+ "asm",
  "bdd",
  "boot_block",
  "bootlib",

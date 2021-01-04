@@ -14,4 +14,4 @@ lock = { path = "../libs/lock" }
 cpu = { path = "../libs/cpu" }
 
 [build-dependencies]
-asmlink = { path = "../libs/asmlink" }
+asm = { path = "../libs/asm" }
