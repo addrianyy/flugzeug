@@ -10,6 +10,27 @@ const VM_CR_MSR:       u32 = 0xc001_0114;
 const VM_HSAVE_PA_MSR: u32 = 0xc001_0117;
 const EFER_MSR:        u32 = 0xc000_0080;
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C, align(64))]
+pub struct FxSave {
+    fcw:        u16,
+    fsw:        u16,
+    ftw:        u8,
+    _rsvd0:     u8,
+    fop:        u16,
+    fip:        u32,
+    fcs:        u16,
+    _rsvd1:     u16,
+    fdp:        u32,
+    fds:        u16,
+    _rsvd2:     u16,
+    mxcsr:      u32,
+    mxcsr_mask: u32,
+    mm:         [u128; 8],
+    xmm:        [u128; 16],
+    reserved:   [u128; 6],
+}
+
 pub struct XsaveArea {
     pointer: *mut u8,
 }
@@ -27,6 +48,15 @@ impl XsaveArea {
 
             // Zero out XSAVE area as required by the architecture.
             core::ptr::write_bytes(xsave_area, 0, xsave_size);
+
+            let mut fxsave = FxSave::default();
+
+            // Setup initial FPU state.
+            fxsave.fcw        = 0x40;
+            fxsave.mxcsr      = 0x1f80;
+            fxsave.mxcsr_mask = 0xffff_0000;
+
+            core::ptr::write(xsave_area as *mut FxSave, fxsave);
 
             Self {
                 pointer: xsave_area,

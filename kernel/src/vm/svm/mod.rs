@@ -475,6 +475,9 @@ impl Vm {
 
         asm!(
             r#"
+                // Disable all interrupts on the system before context switching.
+                clgi
+
                 // Save RBP as it cannot be in the inline assembly clobber list.
                 push rbp
 
@@ -574,6 +577,9 @@ impl Vm {
 
                 // Restore RBP pushed at the beginning.
                 pop rbp
+
+                // Reenable all interrupts on the system.
+                stgi
             "#,
             // All registers except RSP will be clobbered. R8-R14 are also used as inputs
             // so they are not here. RBP is pushed and popped by the inline assembly.

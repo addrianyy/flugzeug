@@ -126,7 +126,14 @@ pub unsafe fn initialize() {
     vm.set_reg(Register::Rsp,          rsp);
     vm.set_reg(Register::Rflags,       2);
 
-    vm.intercept(&[Intercept::Vmmcall, Intercept::Hlt]);
+    vm.intercept(&[
+        Intercept::Vmmcall,
+        Intercept::Hlt,
+        Intercept::Intr,
+        Intercept::Nmi,
+        Intercept::Smi,
+        Intercept::Init,
+    ]);
 
     let mut mapped_pages = 0;
 
@@ -317,6 +324,10 @@ impl VKernel {
             Intercept::Cr0Read, Intercept::Cr0Write,
             Intercept::Cr3Read, Intercept::Cr3Write,
             Intercept::Cr4Read, Intercept::Cr4Write,
+            Intercept::Intr,
+            Intercept::Nmi,
+            Intercept::Smi,
+            Intercept::Init,
         ]);
     }
 
