@@ -49,12 +49,13 @@ impl XsaveArea {
             // Zero out XSAVE area as required by the architecture.
             core::ptr::write_bytes(xsave_area, 0, xsave_size);
 
-            let mut fxsave = FxSave::default();
-
             // Setup initial FPU state.
-            fxsave.fcw        = 0x40;
-            fxsave.mxcsr      = 0x1f80;
-            fxsave.mxcsr_mask = 0xffff_0000;
+            let fxsave = FxSave {
+                fcw:        0x40,
+                mxcsr:      0x1f80,
+                mxcsr_mask: 0xffff_0000,
+                ..FxSave::default()
+            };
 
             core::ptr::write(xsave_area as *mut FxSave, fxsave);
 
