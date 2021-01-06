@@ -181,7 +181,8 @@ pub enum Intercept {
     Invlpg    = MISC_1 | 25,
     Invlpga   = MISC_1 | 26,
     // Skipped IOIO_PROT and MSR_PROT - exposed by the different API.
-    // Skipped task switches and FERR_FREEZE - always off.
+    // Skipped task switches - always off.
+    FerrFreeze = MISC_1 | 30,
     // Skipped shutdown events - always on.
 
     // Skipped VMRUN - always on.
@@ -319,6 +320,7 @@ pub enum VmExit {
     Hlt,
     Invlpg,
     Invlpga,
+    FerrFreeze,
     Io,
     Shutdown,
     Vmrun,
@@ -732,7 +734,7 @@ impl Vm {
             0x7b        => VmExit::Io,
             0x7c        => VmExit::Msr { write: exit_info_1 == 1 },
             0x7d        => unreachable!("task switch"),
-            0x7e        => unreachable!("FERR freeze"),
+            0x7e        => VmExit::FerrFreeze,
             0x7f        => VmExit::Shutdown,
             0x80        => VmExit::Vmrun,
             0x81        => VmExit::Vmmcall,

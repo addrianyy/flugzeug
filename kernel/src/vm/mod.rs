@@ -127,12 +127,21 @@ pub unsafe fn initialize() {
     vm.set_reg(Register::Rflags,       2);
 
     vm.intercept(&[
-        Intercept::Vmmcall,
-        Intercept::Hlt,
+        // Intercept relevant SVM instructions.
+        Intercept::Vmmcall, Intercept::Stgi, Intercept::Clgi, Intercept::Skinit,
+        Intercept::Invlpga,
+
+        // Intercept other instructions.
+        Intercept::Xsetbv, Intercept::Hlt,
+
+        // Intercept all interrupts on the system.
         Intercept::Intr,
         Intercept::Nmi,
         Intercept::Smi,
         Intercept::Init,
+
+        // Intercept other stuff.
+        Intercept::FerrFreeze,
     ]);
 
     let mut mapped_pages = 0;
@@ -325,9 +334,10 @@ impl VKernel {
 
             // Intercept relevant SVM instructions.
             Intercept::Vmmcall, Intercept::Stgi, Intercept::Clgi, Intercept::Skinit,
+            Intercept::Invlpga,
 
             // Intercept other instructions.
-            Intercept::Xsetbv,
+            Intercept::Xsetbv, Intercept::Hlt,
 
             // Intercept reads and writed of relevant CRs.
             Intercept::Cr0Read, Intercept::Cr0Write,
@@ -339,6 +349,9 @@ impl VKernel {
             Intercept::Nmi,
             Intercept::Smi,
             Intercept::Init,
+
+            // Intercept other stuff.
+            Intercept::FerrFreeze,
         ]);
     }
 
