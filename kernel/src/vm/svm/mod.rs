@@ -830,14 +830,27 @@ impl Vm {
             use Register::*;
 
             macro_rules! create_match {
-                ($($register: pat, $field: ident, $clean: expr),*) => {
+                ($($register: pat, $field: ident, $clean: expr, $flush_mask: expr),*) => {
                     match register {
                         $(
                             $register => {
+                                let before                  = self.vmcb_mut().state.$field;
+                                let flush_mask: Option<u64> = $flush_mask;
+
                                 self.vmcb_mut().state.$field = value;
 
                                 if let Some(clean) = $clean {
                                     self.vmcb_dirty(clean);
+                                }
+
+                                if let Some(flush_mask) = flush_mask {
+                                    // If bits in `flush_mask` were changed we need TLB flush.
+                                    let before = before & flush_mask;
+                                    let after  = value  & flush_mask;
+
+                                    if before != after {
+                                        self.flush_tlb();
+                                    }
                                 }
                             }
                         )*
@@ -846,23 +859,39 @@ impl Vm {
                 }
             }
 
+            // Software Rule. When the VMM changes a guest's paging mode by changing entries in
+            // the guest's VMCB, the VMM must ensure that the guest’s TLB entries are flushed from
+            // the TLB. The relevant VMCB state includes:
+
+            // PG, WP, CD, NW.
+            let cr0_mask = (1 << 31) | (1 << 16) | (1 << 30) | (1 << 29);
+
+            // All bits.
+            let cr3_mask = 0xffff_ffff_ffff_ffff;
+
+            // PGE, PAE, PSE.
+            let cr4_mask = (1 << 7) | (1 << 5) | (1 << 4);
+
+            // NXE, LMA, LME.
+            let efer_mask = (1 << 11) | (1 << 10) | (1 << 8);
+
             create_match!(
-                Efer,         efer,           Some(CLEAN_CR),
-                Cr0,          cr0,            Some(CLEAN_CR),
-                Cr2,          cr2,            Some(CLEAN_CR2),
-                Cr3,          cr3,            Some(CLEAN_CR),
-                Cr4,          cr4,            Some(CLEAN_CR),
-                Dr6,          dr6,            Some(CLEAN_DR),
-                Dr7,          dr7,            Some(CLEAN_DR),
-                Star,         star,           None,
-                Lstar,        lstar,          None,
-                Cstar,        cstar,          None,
-                Sfmask,       sfmask,         None,
-                KernelGsBase, kernel_gs_base, None,
-                SysenterCs,   sysenter_cs,    None,
-                SysenterEsp,  sysenter_esp,   None,
-                SysenterEip,  sysenter_eip,   None,
-                Pat,          g_pat,          Some(CLEAN_NP)
+                Efer,         efer,           Some(CLEAN_CR),  Some(efer_mask),
+                Cr0,          cr0,            Some(CLEAN_CR),  Some(cr0_mask),
+                Cr2,          cr2,            Some(CLEAN_CR2), None,
+                Cr3,          cr3,            Some(CLEAN_CR),  Some(cr3_mask),
+                Cr4,          cr4,            Some(CLEAN_CR),  Some(cr4_mask),
+                Dr6,          dr6,            Some(CLEAN_DR),  None,
+                Dr7,          dr7,            Some(CLEAN_DR),  None,
+                Star,         star,           None,            None,
+                Lstar,        lstar,          None,            None,
+                Cstar,        cstar,          None,            None,
+                Sfmask,       sfmask,         None,            None,
+                KernelGsBase, kernel_gs_base, None,            None,
+                SysenterCs,   sysenter_cs,    None,            None,
+                SysenterEsp,  sysenter_esp,   None,            None,
+                SysenterEip,  sysenter_eip,   None,            None,
+                Pat,          g_pat,          Some(CLEAN_NP),  None
             );
         }
     }
@@ -949,7 +978,6 @@ impl Vm {
         state.limit = table.limit as u32;
     }
 
-    #[allow(unused)]
     pub fn flush_tlb(&mut self) {
         // Flush guest TLB entries on the next run.
         self.vmcb_mut().control.tlb_control = 3;
