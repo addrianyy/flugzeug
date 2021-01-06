@@ -82,8 +82,6 @@ fn run_kernel_in_vm() {
     println!();
     println!("Running the kernel in the VM...");
 
-        println!("{:x}", cpu::get_cr0());
-
     let mut vm = Vm::new()
         .expect("Failed to create virtual machine");
 

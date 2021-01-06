@@ -95,7 +95,7 @@ impl VKernel {
             selector: 0x10,
             limit:    0,
             base:     0,
-            attrib:   1 << 7,
+            attrib:   (1 << 7) | (0b10 << 3),
         };
 
         // Present, 64 bit mode code segment with selector 0x8.
@@ -103,7 +103,7 @@ impl VKernel {
             selector: 0x8,
             limit:    0,
             base:     0,
-            attrib:   (1 << 7) | (1 << 9),
+            attrib:   (1 << 7) | (1 << 9) | (0b11 << 3),
         };
 
         let null_segment = Segment::null(0);
