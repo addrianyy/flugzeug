@@ -320,10 +320,21 @@ impl VKernel {
         self.vm.set_reg(Register::Rflags, 2);
 
         self.vm.intercept(&[
-            Intercept::Pf, Intercept::Gp, Intercept::Ud, Intercept::Vmmcall,
+            // Intercept relevant exceptions.
+            Intercept::Pf,
+
+            // Intercept relevant SVM instructions.
+            Intercept::Vmmcall, Intercept::Stgi, Intercept::Clgi, Intercept::Skinit,
+
+            // Intercept other instructions.
+            Intercept::Xsetbv,
+
+            // Intercept reads and writed of relevant CRs.
             Intercept::Cr0Read, Intercept::Cr0Write,
             Intercept::Cr3Read, Intercept::Cr3Write,
             Intercept::Cr4Read, Intercept::Cr4Write,
+
+            // Intercept all interrupts on the system.
             Intercept::Intr,
             Intercept::Nmi,
             Intercept::Smi,

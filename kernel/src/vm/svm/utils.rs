@@ -12,7 +12,7 @@ const EFER_MSR:        u32 = 0xc000_0080;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C, align(64))]
-pub struct FxSave {
+struct FxSave {
     fcw:        u16,
     fsw:        u16,
     ftw:        u8,
@@ -88,6 +88,7 @@ pub struct SvmFeatures {
     pub decode_assists: bool,
     pub nrip_save:      bool,
     pub nested_paging:  bool,
+    pub vmcb_clean:     bool,
 }
 
 impl SvmFeatures {
@@ -102,6 +103,7 @@ impl SvmFeatures {
 
         features.nr_asids       = cpuid.ebx;
         features.decode_assists = (cpuid.edx & (1 << 7)) != 0;
+        features.vmcb_clean     = (cpuid.edx & (1 << 5)) != 0;
         features.nrip_save      = (cpuid.edx & (1 << 3)) != 0;
         features.nested_paging  = (cpuid.edx & (1 << 0)) != 0;
 

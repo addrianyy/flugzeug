@@ -360,7 +360,21 @@ pub struct Vm {
 
     /// Unique address space identifier for the guest.
     asid: Asid,
+
+    /// Set to true if this CPU supports clean VMCB extension.
+    support_vmcb_clean: bool,
+
+    /// Last core this VM was run at. !0 if this VM wasn't run.
+    last_core: u64,
 }
+
+const CLEAN_INTERCEPTS_AND_TSC: u32 = 0;
+const CLEAN_NP:  u32                = 4;
+const CLEAN_CR:  u32                = 5;
+const CLEAN_DR:  u32                = 6;
+const CLEAN_DT:  u32                = 7;
+const CLEAN_SEG: u32                = 8;
+const CLEAN_CR2: u32                = 9;
 
 impl Vm {
     pub fn new() -> Result<Self, VmError> {
@@ -384,6 +398,8 @@ impl Vm {
             npt:             Npt::new(),
 
             asid,
+            support_vmcb_clean: false,
+            last_core:          !0,
         };
 
         vm.initialize(&features)?;
@@ -402,6 +418,9 @@ impl Vm {
                 return Err(VmError::NRipSaveNotSupported);
             }
         }
+
+        // Check if this CPU supports VMCB clean.
+        self.support_vmcb_clean = features.vmcb_clean;
 
         let n_cr3 = self.npt.table().0;
         let asid  = self.asid.get();
@@ -444,6 +463,13 @@ impl Vm {
         Ok(())
     }
 
+    fn vmcb_dirty(&mut self, bit: u32) {
+        if self.support_vmcb_clean {
+            // Unset the clean bit to mark that this part of VMCB has been modified.
+            self.vmcb_mut().control.vmcb_clean &= !(1 << bit);
+        }
+    }
+
     #[allow(unused)]
     pub fn intercept(&mut self, intercepts: &[Intercept]) {
         for &intercept in intercepts {
@@ -467,6 +493,22 @@ impl Vm {
     }
 
     pub unsafe fn run(&mut self) -> VmExit {
+        // Handle case where this VM is ran on different CPU than before (or is ran for the first
+        // time).
+        if core!().id != self.last_core {
+            // If we are running on different core than it may have SVM disabled. Enable it.
+            utils::enable_svm()
+                .expect("VM was moved to the CPU which doesn't support SVM.");
+
+            if self.support_vmcb_clean {
+                // We are required to zero out `vmcb_clean` if we are running for the first
+                // time or on different core.
+                self.vmcb_mut().control.vmcb_clean = 0;
+            }
+
+            self.last_core = core!().id;
+        }
+
         // Copy relevant registers from the cache to the VMCB.
         self.vmcb_mut().state.rax    = self.reg(Register::Rax);
         self.vmcb_mut().state.rsp    = self.reg(Register::Rsp);
@@ -476,6 +518,8 @@ impl Vm {
         asm!(
             r#"
                 // Disable all interrupts on the system before context switching.
+                // If interrupt happens during the switch, handler may overwrite some
+                // guest state.
                 clgi
 
                 // Save RBP as it cannot be in the inline assembly clobber list.
@@ -578,7 +622,8 @@ impl Vm {
                 // Restore RBP pushed at the beginning.
                 pop rbp
 
-                // Reenable all interrupts on the system.
+                // Reenable all interrupts on the system. If we exited for example due to NMI,
+                // this will cause us to deliver that NMI to the kernel as it is pending now.
                 stgi
             "#,
             // All registers except RSP will be clobbered. R8-R14 are also used as inputs
@@ -608,6 +653,15 @@ impl Vm {
         self.set_reg(Register::Rsp,    self.vmcb().state.rsp);
         self.set_reg(Register::Rip,    self.vmcb().state.rip);
         self.set_reg(Register::Rflags, self.vmcb().state.rflags);
+
+        // TLB was flushed, clear the flag to avoid flush next time this VM is ran.
+        self.vmcb_mut().control.tlb_control = 0;
+
+        if self.support_vmcb_clean {
+            // So far nothing has been modified in the VMCB. Even though some bits are reserved
+            // AMD allows setting this to `0xffff_ffff`.
+            self.vmcb_mut().control.vmcb_clean = 0xffff_ffff;
+        }
 
         let control     = &self.vmcb().control;
         let exit_code   = control.exitcode;
@@ -776,10 +830,16 @@ impl Vm {
             use Register::*;
 
             macro_rules! create_match {
-                ($($register: pat, $field: ident),*) => {
+                ($($register: pat, $field: ident, $clean: expr),*) => {
                     match register {
                         $(
-                            $register => self.vmcb_mut().state.$field = value,
+                            $register => {
+                                self.vmcb_mut().state.$field = value;
+
+                                if let Some(clean) = $clean {
+                                    self.vmcb_dirty(clean);
+                                }
+                            }
                         )*
                         _ => unreachable!(),
                     }
@@ -787,22 +847,22 @@ impl Vm {
             }
 
             create_match!(
-                Efer,         efer,
-                Cr0,          cr0,
-                Cr2,          cr2,
-                Cr3,          cr3,
-                Cr4,          cr4,
-                Dr6,          dr6,
-                Dr7,          dr7,
-                Star,         star,
-                Lstar,        lstar,
-                Cstar,        cstar,
-                Sfmask,       sfmask,
-                KernelGsBase, kernel_gs_base,
-                SysenterCs,   sysenter_cs,
-                SysenterEsp,  sysenter_esp,
-                SysenterEip,  sysenter_eip,
-                Pat,          g_pat
+                Efer,         efer,           Some(CLEAN_CR),
+                Cr0,          cr0,            Some(CLEAN_CR),
+                Cr2,          cr2,            Some(CLEAN_CR2),
+                Cr3,          cr3,            Some(CLEAN_CR),
+                Cr4,          cr4,            Some(CLEAN_CR),
+                Dr6,          dr6,            Some(CLEAN_DR),
+                Dr7,          dr7,            Some(CLEAN_DR),
+                Star,         star,           None,
+                Lstar,        lstar,          None,
+                Cstar,        cstar,          None,
+                Sfmask,       sfmask,         None,
+                KernelGsBase, kernel_gs_base, None,
+                SysenterCs,   sysenter_cs,    None,
+                SysenterEsp,  sysenter_esp,   None,
+                SysenterEip,  sysenter_eip,   None,
+                Pat,          g_pat,          Some(CLEAN_NP)
             );
         }
     }
@@ -833,6 +893,8 @@ impl Vm {
 
     pub fn set_segment_reg(&mut self, register: SegmentRegister, segment: Segment) {
         use SegmentRegister::*;
+
+        self.vmcb_dirty(CLEAN_SEG);
 
         if register == SegmentRegister::Cs {
             // Update the CPL when changing CS.
@@ -875,6 +937,8 @@ impl Vm {
     }
 
     pub fn set_table_reg(&mut self, register: TableRegister, table: DescriptorTable) {
+        self.vmcb_dirty(CLEAN_DT);
+
         let state = &mut self.vmcb_mut().state;
         let state = match register {
             TableRegister::Idt => &mut state.idtr,
@@ -883,6 +947,12 @@ impl Vm {
 
         state.base  = table.base;
         state.limit = table.limit as u32;
+    }
+
+    #[allow(unused)]
+    pub fn flush_tlb(&mut self) {
+        // Flush guest TLB entries on the next run.
+        self.vmcb_mut().control.tlb_control = 3;
     }
 
     fn vmcb(&self) -> &Vmcb {
@@ -920,6 +990,7 @@ impl Vm {
 
     #[allow(unused)]
     pub fn set_tsc_offset(&mut self, offset: u64) {
+        self.vmcb_dirty(CLEAN_INTERCEPTS_AND_TSC);
         self.vmcb_mut().control.tsc_offset = offset;
     }
 }
