@@ -43,7 +43,7 @@ unsafe fn force_acquire_lock<T>(lock: &Lock<T>) -> LockGuard<'_, T> {
     }
 
     // This lock is most likely held by this core. Take the lock in unsafe manner.
-    lock.steal_and_block()
+    lock.force_take()
 }
 
 enum SerialPortWrapper {
@@ -182,6 +182,8 @@ unsafe fn begin_panic() -> bool {
     // Make sure to disable interrupts as system is in possibly invalid state.
     cpu::disable_interrupts();
 
+    // We have panicked very early and cannot NMI other cores. That's fine, all of them
+    // should be waiting for us.
     if !has_core_locals() {
         return true;
     }
@@ -214,7 +216,7 @@ unsafe fn begin_panic() -> bool {
 
             {
                 // Wait for the CPU to become halted.
-                let wait_microseconds = 150_000;
+                let wait_microseconds = 200_000;
                 let wait_cycles       = ASSUMED_CPU_FREQUENCY_MHZ * wait_microseconds;
 
                 let end_tsc = time::get_tsc() + wait_cycles;
@@ -223,6 +225,8 @@ unsafe fn begin_panic() -> bool {
                     if processors::core_state(apic_id) == CoreState::Halted {
                         break;
                     }
+
+                    core::sync::atomic::spin_loop_hint();
                 }
 
                 // Timeout, we hope that this procesor will get halted soon.

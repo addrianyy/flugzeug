@@ -10,7 +10,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 #[repr(C)]
 pub struct Lock<T: ?Sized> {
     locked:  AtomicBool,
-    blocked: AtomicBool,
     value:   UnsafeCell<T>,
 }
 
@@ -19,7 +18,6 @@ impl<T> Lock<T> {
         Lock {
             value:   UnsafeCell::new(value),
             locked:  AtomicBool::new(false),
-            blocked: AtomicBool::new(false),
         }
     }
 }
@@ -40,8 +38,9 @@ impl<T: ?Sized> Lock<T> {
         }
 
         LockGuard {
-            lock:  self,
-            value: unsafe { &mut *self.value.get() },
+            lock:        self,
+            value:       unsafe { &mut *self.value.get() },
+            force_taken: false,
         }
     }
 
@@ -50,8 +49,9 @@ impl<T: ?Sized> Lock<T> {
         if self.locked.compare_exchange(false, true, Ordering::Acquire,
                                         Ordering::Relaxed).is_ok() {
             Some(LockGuard {
-                lock:  self,
-                value: unsafe { &mut *self.value.get() },
+                lock:        self,
+                value:       unsafe { &mut *self.value.get() },
+                force_taken: false,
             })
         } else {
             None
@@ -59,15 +59,11 @@ impl<T: ?Sized> Lock<T> {
     }
 
     #[inline(always)]
-    pub unsafe fn steal_and_block(&self) -> LockGuard<T> {
-        // Set the lock state to blocked so it will never be unlocked. As someone may
-        // have unlocked this lock before we set `blocked` we also set `locked`.
-        self.blocked.store(true, Ordering::Relaxed);
-        self.locked.store(true, Ordering::Release);
-
+    pub unsafe fn force_take(&self) -> LockGuard<T> {
         LockGuard {
-            lock:  self,
-            value: &mut *self.value.get(),
+            lock:        self,
+            value:       &mut *self.value.get(),
+            force_taken: true,
         }
     }
 
@@ -78,14 +74,15 @@ impl<T: ?Sized> Lock<T> {
 }
 
 pub struct LockGuard<'a, T: ?Sized> {
-    lock:  &'a Lock<T>,
-    value: &'a mut T,
+    lock:        &'a Lock<T>,
+    value:       &'a mut T,
+    force_taken: bool,
 }
 
 impl<'a, T: ?Sized> Drop for LockGuard<'a, T> {
     fn drop(&mut self) {
-        // Unlock the lock only if it is not blocked.
-        if !self.lock.blocked.load(Ordering::Relaxed) {
+        // Unlock the lock only if it is wasn't taken by force.
+        if !self.force_taken {
             self.lock.locked.store(false, Ordering::Release);
         }
     }
