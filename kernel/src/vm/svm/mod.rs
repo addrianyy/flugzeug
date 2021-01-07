@@ -6,7 +6,7 @@ mod utils;
 
 use core::fmt;
 
-use crate::mm::PhysicalPage;
+use crate::mm::{PhysicalPage, ContiguousRegion};
 use crate::once::Once;
 
 use utils::{XsaveArea, SvmFeatures, Asid};
@@ -350,6 +350,14 @@ pub enum Event {
     SoftwareInterrupt(u8),
 }
 
+const CLEAN_INTERCEPTS_AND_TSC: u32 = 0;
+const CLEAN_NP:  u32                = 4;
+const CLEAN_CR:  u32                = 5;
+const CLEAN_DR:  u32                = 6;
+const CLEAN_DT:  u32                = 7;
+const CLEAN_SEG: u32                = 8;
+const CLEAN_CR2: u32                = 9;
+
 pub struct Vm {
     /// Guest state. It must be configured by the user of the VM. It is loaded just before
     /// `vmrun` and saved right after.
@@ -378,15 +386,13 @@ pub struct Vm {
 
     /// Value to set `tlb_control` to to flush guest TLB.
     flush_tlb_value: u32,
-}
 
-const CLEAN_INTERCEPTS_AND_TSC: u32 = 0;
-const CLEAN_NP:  u32                = 4;
-const CLEAN_CR:  u32                = 5;
-const CLEAN_DR:  u32                = 6;
-const CLEAN_DT:  u32                = 7;
-const CLEAN_SEG: u32                = 8;
-const CLEAN_CR2: u32                = 9;
+    /// Permission bitmap for MSRs. Determines if MSR read/write is intercepted.
+    msrpm: ContiguousRegion,
+
+    /// Permission bitmap for IO ports. Determines if port input/output is intercepted.
+    iopm: ContiguousRegion,
+}
 
 impl Vm {
     pub fn new() -> Result<Self, VmError> {
@@ -413,6 +419,10 @@ impl Vm {
             support_vmcb_clean: false,
             last_core:          !0,
             flush_tlb_value:    0,
+
+            // Create zeroed permission bitmaps with correct sizes.
+            msrpm: ContiguousRegion::new(8192),
+            iopm:  ContiguousRegion::new(12288),
         };
 
         vm.initialize(&features)?;
@@ -462,21 +472,23 @@ impl Vm {
         let n_cr3 = self.npt.table().0;
         let asid  = self.asid.get();
 
+        let iopm_pa  = self.iopm.phys_addr().0;
+        let msrpm_pa = self.msrpm.phys_addr().0;
+
         let control = &mut self.vmcb_mut().control;
 
-        // Always intercept VMRUN and shutdown events. Other intercepts will be configured by
-        // the user.
+        // Always intercept VMRUN and shutdown events. Use IOPM and MSRPM.
+        // Other intercepts will be configured by the user.
         control.intercept_misc_2 = 1;
-        control.intercept_misc_1 = 1 << 31;
+        control.intercept_misc_1 = (1 << 27) | (1 << 28) | (1 << 31);
 
         // Pause filters aren't used.
         control.pause_filter_threshold = 0;
         control.pause_filter_count     = 0;
 
-        // IOPM_BASE_PA and MSRPM_BASE_PA aren't used now.
-        // TODO: Implement it.
-        control.iopm_base_pa  = 0;
-        control.msrpm_base_pa = 0;
+        // Assign physical addresses of permission bitmaps.
+        control.iopm_base_pa  = iopm_pa;
+        control.msrpm_base_pa = msrpm_pa;
 
         // TSC offset starts at 0. Can be adjusted by the user.
         control.tsc_offset = 0;

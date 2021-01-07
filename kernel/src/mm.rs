@@ -2,7 +2,9 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use core::ops::{Deref, DerefMut};
 use core::marker::PhantomData;
+use alloc::vec::Vec;
 
+use lock::Lock;
 use rangeset::Range;
 use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
                  PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE, PAGE_PAT, PAGE_PWT};
@@ -635,6 +637,8 @@ pub unsafe fn initialize() {
     set_memory_type!(PAGE_WC,          0x01);
 
     cpu::wrmsr(IA32_PAT, pat);
+
+    *CONTIGUOUS_REGIONS.lock() = Some(ContiguousRegions::default());
 }
 
 pub unsafe fn virt_to_phys(virt_addr: VirtAddr) -> Option<PhysAddr> {
@@ -722,8 +726,159 @@ impl<T> Drop for PhysicalPage<T> {
             core::ptr::drop_in_place(self.virt_addr.0 as *mut T);
 
             // Free object memory using the same layout as in constructor.
-            GLOBAL_ALLOCATOR.dealloc(self.virt_addr.0 as *mut u8,
-                Layout::from_size_align(4096, 4096).unwrap());
+            GLOBAL_ALLOCATOR.dealloc(
+                self.virt_addr.0 as *mut u8, Layout::from_size_align(4096, 4096).unwrap(),
+            );
+        }
+    }
+}
+
+static CONTIGUOUS_REGIONS: Lock<Option<ContiguousRegions>> = Lock::new(None);
+
+enum ContiguousType {
+    Size4K  = 0,
+    Size8K  = 1,
+    Size12K = 2,
+    Size16K = 3,
+    Num,
+}
+
+impl ContiguousType {
+    fn from_size(size: usize) -> Self {
+        match size {
+            4096  => Self::Size4K,
+            8192  => Self::Size8K,
+            12288 => Self::Size12K,
+            16384 => Self::Size16K,
+            _     => panic!("Unsupported contiguous memory size."),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ContiguousRegions {
+    regions: [Vec<ContiguousRegion>; ContiguousType::Num as usize],
+}
+
+impl ContiguousRegions {
+    fn regions(&mut self, size: usize) -> &mut Vec<ContiguousRegion> {
+        let size_type = ContiguousType::from_size(size);
+
+        &mut self.regions[size_type as usize]
+    }
+
+    fn allocate(&mut self, size: usize) -> ContiguousRegion {
+        assert!(size % 4096 == 0, "Size is not page aligned.");
+
+        let mut region = if let Some(region) = self.regions(size).pop() {
+            region
+        } else {
+            // Allocate physically contiguous region.
+            let phys_addr = core!().boot_block
+                .free_memory
+                .lock()
+                .as_mut()
+                .unwrap()
+                .allocate_limited(size as u64, 4096, Some(MAX_ACCESSIBLE_PHYSICAL_ADDRESS))
+                .expect("Failed to allocate physically contiguous region.") as u64;
+
+            // Reserve virtual memory for this region.
+            let virt_addr = reserve_virt_addr(size);
+
+            let mut page_table = core!().boot_block.page_table.lock();
+            let page_table     = page_table.as_mut().unwrap();
+
+            // Map the contiguous to the virtual memory as writable and non-executable.
+            for offset in (0..size).step_by(4096) {
+                let offset    = offset as u64;
+                let phys_addr = phys_addr + offset;
+                let virt_addr = VirtAddr(virt_addr.0 + offset);
+
+                let backing = PAGE_PRESENT | PAGE_WRITE | PAGE_NX | phys_addr;
+
+                unsafe {
+                    page_table.map_raw(&mut PhysicalMemory, virt_addr, PageType::Page4K,
+                                       backing, true, false)
+                        .expect("Failed to map contiguous region to the virtual memory.");
+                }
+            }
+
+            ContiguousRegion {
+                phys_addr: PhysAddr(phys_addr as u64),
+                virt_addr,
+                size,
+            }
+        };
+
+        // Make sure that the size matches.
+        assert!(region.size == size, "Corrupted region size.");
+
+        // Zero out the region.
+        region.iter_mut().for_each(|x| *x = 0);
+
+        region
+    }
+
+    unsafe fn free(&mut self, region: ContiguousRegion) {
+        self.regions(region.size)
+            .push(region);
+    }
+}
+
+pub struct ContiguousRegion {
+    phys_addr: PhysAddr,
+    virt_addr: VirtAddr,
+    size:      usize,
+}
+
+impl ContiguousRegion {
+    pub fn new(size: usize) -> Self {
+        // Get new region from the contiguous allocator.
+        CONTIGUOUS_REGIONS
+            .lock()
+            .as_mut()
+            .unwrap()
+            .allocate(size)
+    }
+
+    pub fn phys_addr(&self) -> PhysAddr {
+        self.phys_addr
+    }
+}
+
+impl Deref for ContiguousRegion {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            core::slice::from_raw_parts(self.virt_addr.0 as *const u8, self.size)
+        }
+    }
+}
+
+impl DerefMut for ContiguousRegion {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            core::slice::from_raw_parts_mut(self.virt_addr.0 as *mut u8, self.size)
+        }
+    }
+}
+
+impl Drop for ContiguousRegion {
+    fn drop(&mut self) {
+        unsafe {
+            let clone = ContiguousRegion {
+                phys_addr: self.phys_addr,
+                virt_addr: self.virt_addr,
+                size:      self.size,
+            };
+
+            // Return this region to the contiguous allocator.
+            CONTIGUOUS_REGIONS
+                .lock()
+                .as_mut()
+                .unwrap()
+                .free(clone);
         }
     }
 }
