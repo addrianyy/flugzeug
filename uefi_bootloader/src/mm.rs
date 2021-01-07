@@ -1,7 +1,7 @@
 use core::convert::TryInto;
 use core::alloc::Layout;
 
-use lock::Lock;
+use crate::lock::Lock;
 use rangeset::{RangeSet, Range};
 use page_table::{PhysMem, PhysAddr};
 

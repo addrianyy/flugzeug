@@ -3,7 +3,7 @@ use core::alloc::Layout;
 use core::alloc::GlobalAlloc;
 
 use page_table::{PhysAddr, PageType};
-use lock::Lock;
+use crate::lock::{Lock, KernelInterrupts};
 
 use crate::interrupts::Interrupts;
 use crate::apic::{Apic, ApicMode};
@@ -56,7 +56,7 @@ pub struct CoreLocals {
     pub id: u64,
 
     /// Data shared between bootloader and kernel.
-    pub boot_block: &'static BootBlock,
+    pub boot_block: &'static BootBlock<KernelInterrupts>,
 
     /// Local APIC for this core.
     pub apic: Lock<Option<Apic>>,
@@ -128,6 +128,22 @@ impl CoreLocals {
     }
 }
 
+struct EarlyInterrupts;
+
+impl lock::KernelInterrupts for EarlyInterrupts {
+    fn in_exception() -> bool { false }
+    fn in_interrupt() -> bool { false }
+
+    fn core_id() -> u32 {
+        // This is safe because during initialization there is only one core running at
+        // a time.
+        (NEXT_FREE_CORE_ID.load(Ordering::Relaxed) - 1) as u32
+    }
+
+    unsafe fn enable_interrupts() {}
+    unsafe fn disable_interrupts() {}
+}
+
 // Make sure that `CoreLocals` is Sync.
 trait SyncGuard: Sync + Sized {}
 impl  SyncGuard for CoreLocals {}
@@ -141,14 +157,16 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
     // Make sure that we got valid boot block from the bootloader.
     assert!(boot_block.0 != 0, "Boot block is null.");
 
-    let core_id    = NEXT_FREE_CORE_ID.fetch_add(1, Ordering::SeqCst);
-    let boot_block = mm::phys_ref::<BootBlock>(boot_block).unwrap();
-
-    // Make sure that structure size is the same in 32 bit and 64 bit mode.
-    assert!(boot_block.size == core::mem::size_of::<BootBlock>() as u64,
-            "Boot block size mismatch.");
-
+    let core_id         = NEXT_FREE_CORE_ID.fetch_add(1, Ordering::SeqCst);
     let core_locals_ptr = {
+        // Get boot block using early interrupts because normal `KernelInterrupts` use core!
+        // macro.
+        let boot_block = mm::phys_ref::<BootBlock<EarlyInterrupts>>(boot_block).unwrap();
+
+        // Make sure that structure size is the same in 32 bit and 64 bit mode.
+        assert!(boot_block.size == core::mem::size_of::<BootBlock<EarlyInterrupts>>() as u64,
+                "Boot block size mismatch.");
+
         let size  = core::mem::size_of::<CoreLocals>()  as u64;
         let align = core::mem::align_of::<CoreLocals>() as u64;
 
@@ -164,7 +182,7 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
         let page_table     = page_table.as_mut().unwrap();
 
         // Normal `PhysicalMemory` uses `CoreLocals` so we cannot use it.
-        struct EarlyPhysicalMemory(&'static BootBlock);
+        struct EarlyPhysicalMemory(&'static BootBlock<EarlyInterrupts>);
 
         impl page_table::PhysMem for EarlyPhysicalMemory {
             unsafe fn translate(&mut self, phys_addr: PhysAddr, size: usize) -> Option<*mut u8> {
@@ -185,6 +203,13 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
 
         virt_addr.0 as usize
     };
+
+    // Get boot block for the second time, this time we can use `KernelInterrupts`.
+    let boot_block = mm::phys_ref::<BootBlock<KernelInterrupts>>(boot_block).unwrap();
+
+    // Make sure that structure size is the same in 32 bit and 64 bit mode.
+    assert!(boot_block.size == core::mem::size_of::<BootBlock<KernelInterrupts>>() as u64,
+            "Boot block size mismatch.");
 
     let features = cpu::get_features();
 

@@ -4,7 +4,7 @@ use core::ops::{Deref, DerefMut};
 use core::marker::PhantomData;
 use alloc::vec::Vec;
 
-use lock::Lock;
+use crate::lock::Lock;
 use rangeset::Range;
 use page_table::{VirtAddr, PhysAddr, PhysMem, PageType, PAGE_PRESENT, PAGE_WRITE,
                  PAGE_SIZE, PAGE_NX, PAGE_CACHE_DISABLE, PAGE_PAT, PAGE_PWT};
@@ -40,7 +40,8 @@ impl PhysMem for PhysicalMemory {
     }
 }
 
-pub unsafe fn alloc_phys(boot_block: &BootBlock, layout: Layout) -> Option<PhysAddr> {
+pub unsafe fn alloc_phys<I: lock::KernelInterrupts>(boot_block: &BootBlock<I>,
+                                                    layout: Layout) -> Option<PhysAddr> {
     let mut free_memory = boot_block.free_memory.lock();
     let free_memory     = free_memory.as_mut().unwrap();
 
@@ -458,6 +459,8 @@ unsafe fn cleanup_bootloader() {
 }
 
 pub unsafe fn on_finished_boot_process() {
+    type BootBlock = boot_block::BootBlock<crate::lock::KernelInterrupts>;
+
     static READY_CORES:    AtomicU32   = AtomicU32::new(0);
     static NEW_BOOT_BLOCK: AtomicUsize = AtomicUsize::new(0);
 

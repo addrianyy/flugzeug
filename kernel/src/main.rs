@@ -11,6 +11,7 @@ mod vm;
 mod mm;
 mod once;
 mod apic;
+mod lock;
 mod acpi;
 mod font;
 mod time;

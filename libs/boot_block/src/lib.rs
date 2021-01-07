@@ -1,8 +1,9 @@
 #![no_std]
+#![feature(const_fn)]
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 
-use lock::Lock;
+use lock::{Lock, KernelInterrupts};
 use rangeset::RangeSet;
 use page_table::PageTable;
 use serial_port::SerialPort;
@@ -58,31 +59,31 @@ pub struct SupportedModes {
 
 /// Data shared between the bootloader and the kernel. Allows for concurrent access.
 #[repr(C)]
-pub struct BootBlock {
+pub struct BootBlock<I: KernelInterrupts> {
     /// Size of the `BootBlock` used to make sure that the shape of the structure is the same
     /// in 32 bit mode and 64 bit mode.
     pub size: u64,
 
     /// Free physical memory ranges available on the system.
-    pub free_memory: Lock<Option<RangeSet>>,
+    pub free_memory: Lock<Option<RangeSet>, I>,
 
     /// Free physical memory ranges available on the system.
-    pub boot_memory: Lock<Option<RangeSet>>,
+    pub boot_memory: Lock<Option<RangeSet>, I>,
 
     /// Serial port connection which allows for `print!` macros.
-    pub serial_port: Lock<Option<SerialPort>>,
+    pub serial_port: Lock<Option<SerialPort>, I>,
 
     /// Page tables created by the bootloader and used by the kernel.
-    pub page_table: Lock<Option<PageTable>>,
+    pub page_table: Lock<Option<PageTable>, I>,
 
-    pub physical_map_page_size: Lock<Option<u64>>,
-    pub ap_entrypoint:          Lock<Option<u64>>,
-    pub acpi_tables:            Lock<AcpiTables>,
-    pub framebuffer:            Lock<Option<FramebufferInfo>>,
-    pub supported_modes:        Lock<Option<SupportedModes>>,
+    pub physical_map_page_size: Lock<Option<u64>, I>,
+    pub ap_entrypoint:          Lock<Option<u64>, I>,
+    pub acpi_tables:            Lock<AcpiTables, I>,
+    pub framebuffer:            Lock<Option<FramebufferInfo>, I>,
+    pub supported_modes:        Lock<Option<SupportedModes>, I>,
 }
 
-impl BootBlock {
+impl<I: KernelInterrupts> BootBlock<I> {
     /// Create an empty `BootBlock` and cache the size of it in current processor mode.
     pub const fn new() -> Self {
         Self {

@@ -7,7 +7,7 @@ use crate::processors::{self, CoreState};
 use crate::time;
 
 use serial_port::SerialPort;
-use lock::{Lock, LockGuard};
+use crate::lock::{Lock, LockGuard};
 
 const CORE_UNLOCKED: u64 = 0xffff_ffff_ffff_ffff;
 const CORE_UNKNOWN:  u64 = 0xffff_ffff_ffff_fffe;

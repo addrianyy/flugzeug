@@ -7,10 +7,11 @@ extern crate alloc;
 #[macro_use] mod serial;
 mod panic;
 mod bios;
+mod lock;
 mod mm;
 
 use core::convert::TryInto;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use boot_block::{BootBlock, KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
                  KERNEL_STACK_BASE, KERNEL_STACK_SIZE, KERNEL_STACK_PADDING, AcpiTables};
@@ -21,7 +22,7 @@ use bdd::{BootDiskDescriptor, BootDiskData};
 use elfparse::{Elf, Bitness, SegmentType, Machine};
 use bios::RegisterState;
 use mm::PhysicalMemory;
-use lock::Lock;
+use crate::lock::{Lock, EmptyInterrupts};
 
 // Bootloader is not thread safe. There can be only one instance of it running at a time.
 // Kernel launches cores one by one to make sure that this is indeed what happens.
@@ -30,7 +31,7 @@ use lock::Lock;
 /// exactly the same shape in 32 bit and 64 bit mode. It allows for concurrent memory
 /// allocation and modification and serial port interface.
 /// It will be moved to the kernel after finishing boot process.
-pub static BOOT_BLOCK: BootBlock = BootBlock::new();
+pub static BOOT_BLOCK: BootBlock<EmptyInterrupts> = BootBlock::new();
 
 /// Data required to enter the kernel. If it is `None` then kernel wasn't loaded
 /// from disk yet.
@@ -40,7 +41,8 @@ static KERNEL_ENTRY_DATA: Lock<Option<KernelEntryData>> = Lock::new(None);
 /// and advances the value. There is no 64 bit atomic value in 32 bit mode so `Lock` is used.
 static NEXT_STACK_ADDRESS: Lock<u64> = Lock::new(KERNEL_STACK_BASE);
 
-static LOCATED_ACPI: AtomicBool = AtomicBool::new(false);
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+static CORE_ID:     AtomicU32  = AtomicU32::new(0);
 
 #[derive(Copy, Clone)]
 struct KernelEntryData {
@@ -407,8 +409,6 @@ unsafe fn locate_acpi() {
 
             // All checks succedded, we have found the ACPI tables.
 
-            LOCATED_ACPI.store(true, Ordering::Relaxed);
-
             *BOOT_BLOCK.acpi_tables.lock() = tables;
 
             return;
@@ -427,19 +427,21 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
     assert!(core::mem::size_of::<u64>() == 8 && core::mem::align_of::<u64>() == 8,
             "U64 has invalid size/alignment.");
 
-    // Initialize crucial bootloader components. This won't do anything if they
-    // were already initialized by other CPU.
-    unsafe {
-        serial::initialize();
+    if !INITIALIZED.load(Ordering::Relaxed) {
+        // Initialize crucial bootloader components.
+        unsafe {
+            serial::initialize();
+            bootlib::verify_cpu();
+            mm::initialize();
 
-        bootlib::verify_cpu();
-
-        mm::initialize();
-
-        // Find ACPI tables on the system if they weren't found before.
-        if !LOCATED_ACPI.load(Ordering::Relaxed) {
             locate_acpi();
         }
+
+        INITIALIZED.store(true, Ordering::Relaxed);
+    } else {
+        CORE_ID.fetch_add(1, Ordering::Relaxed);
+
+        bootlib::verify_cpu();
     }
 
     // Set AP entrypoint so kernel will be able to launch other processors.

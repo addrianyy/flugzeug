@@ -1,8 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 
 use crate::mm::{self, PhysicalPage};
-
-use lock::Lock;
+use crate::lock::Lock;
 
 use super::VmError;
 

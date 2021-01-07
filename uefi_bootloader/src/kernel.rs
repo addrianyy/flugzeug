@@ -9,7 +9,7 @@ use boot_block::{KERNEL_PHYSICAL_REGION_BASE, KERNEL_PHYSICAL_REGION_SIZE,
 
 use page_table::{PageTable, PageType, VirtAddr, PAGE_PRESENT, PAGE_WRITE, PAGE_SIZE};
 use elfparse::{Elf, Bitness, SegmentType, Machine};
-use lock::Lock;
+use crate::lock::Lock;
 
 #[derive(Copy, Clone)]
 struct KernelEntryData {

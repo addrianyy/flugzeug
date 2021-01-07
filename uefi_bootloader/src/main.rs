@@ -14,12 +14,14 @@ mod binaries;
 mod kernel;
 mod serial;
 mod panic;
+mod lock;
 mod efi;
 mod mm;
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 
 use boot_block::BootBlock;
+use crate::lock::EmptyInterrupts;
 
 // Bootloader is not thread safe. There can be only one instance of it running at a time.
 // Kernel launches cores one by one to make sure that this is indeed what happens.
@@ -28,8 +30,9 @@ use boot_block::BootBlock;
 /// exactly the same shape in 32 bit and 64 bit mode. It allows for concurrent memory
 /// allocation and modification and serial port interface.
 /// It will be moved to the kernel after finishing boot process.
-static BOOT_BLOCK:  BootBlock  = BootBlock::new();
-static INITIALIZED: AtomicBool = AtomicBool::new(false);
+static BOOT_BLOCK:  BootBlock<EmptyInterrupts> = BootBlock::new();
+static INITIALIZED: AtomicBool                 = AtomicBool::new(false);
+static CORE_ID:     AtomicU32                  = AtomicU32::new(0);
 
 #[no_mangle]
 extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) -> ! {
@@ -60,6 +63,8 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
 
         INITIALIZED.store(true, Ordering::Relaxed);
     } else {
+        CORE_ID.fetch_add(1, Ordering::Relaxed);
+
         bootlib::verify_cpu();
 
         // AP entrypoint should pass zeroes here because EFI is unavailable.

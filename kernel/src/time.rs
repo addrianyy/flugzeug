@@ -3,8 +3,8 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::mm;
 use crate::hpet::Hpet;
+use crate::lock::Lock;
 
-use lock::Lock;
 use page_table::PhysAddr;
 
 static HPET:     Lock<Option<Hpet>> = Lock::new(None);

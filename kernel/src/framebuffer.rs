@@ -1,10 +1,10 @@
 use alloc::{vec, boxed::Box};
 
 use crate::{mm, font};
+use crate::lock::Lock;
 
 use boot_block::{FramebufferInfo, PixelFormat};
 use page_table::PhysAddr;
-use lock::Lock;
 
 pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 
