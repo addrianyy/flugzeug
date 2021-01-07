@@ -12,6 +12,7 @@ unsafe fn guest_entrypoint() -> ! {
 
     asm!(r#"
         mov eax, 0x1337
+        int3
         vmmcall
     "#);
 
@@ -139,12 +140,29 @@ fn run_kernel_in_vm() {
     }
 
     vm.intercept(&[
+        Intercept::De,
+        Intercept::Db,
+        Intercept::Of,
+        Intercept::Br,
+        Intercept::Ud,
+        Intercept::Nm,
+        Intercept::Df,
+        Intercept::Ts,
+        Intercept::Np,
+        Intercept::Ss,
+        Intercept::Gp,
+        Intercept::Pf,
+        Intercept::Mf,
+        Intercept::Ac,
+        Intercept::Mc,
+        Intercept::Xf,
+
         // Intercept relevant SVM instructions.
         Intercept::Vmmcall, Intercept::Stgi, Intercept::Clgi, Intercept::Skinit,
         Intercept::Invlpga,
 
         // Intercept other instructions.
-        Intercept::Xsetbv, Intercept::Hlt,
+        Intercept::Xsetbv, Intercept::Hlt, Intercept::Invlpgb,
 
         // Intercept all interrupts on the system.
         Intercept::Intr,
@@ -159,7 +177,9 @@ fn run_kernel_in_vm() {
     let mut mapped_pages = 0;
 
     'run: loop {
-        let exit = unsafe { vm.run() };
+        let (exit, delivery) = unsafe { vm.run() };
+
+        let mut unhandled = false;
 
         match exit {
             VmExit::NestedPageFault { address, .. } => {
@@ -172,21 +192,31 @@ fn run_kernel_in_vm() {
                 }
 
                 mapped_pages += 1;
-
-                continue 'run;
             }
             VmExit::Vmmcall => {
                 println!("vmmcall: {:#x}.", vm.reg(Register::Rax));
 
                 vm.set_reg(Register::Rip, vm.next_rip());
-
-                continue 'run;
             }
-            VmExit::Hlt => {}
-            _           => panic!("Unhandled VM exit {:x?}.", exit),
+            VmExit::Hlt      => break 'run,
+            VmExit::Shutdown => {
+                panic!("VM shutdown because of event: {:?}", delivery.unwrap());
+            }
+            _ => unhandled = true,
         }
 
-        break 'run;
+
+        if unhandled {
+            println!("Unhandled VM exit {:x?}.", exit)
+        }
+
+        if let Some(delivery) = delivery {
+            println!("Intercepted delivery of {:?}.", delivery);
+        }
+
+        if unhandled || delivery.is_some() {
+            panic!("VM failure.");
+        }
     }
 
     println!("Done! Mapped in {} pages.", mapped_pages);

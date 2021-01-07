@@ -342,6 +342,7 @@ pub enum VmExit {
     Mcommit,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     Intr(u8),
     Nmi,
@@ -496,6 +497,62 @@ impl Vm {
         Ok(())
     }
 
+    fn intercepted_delivery(&self) -> Option<Event> {
+        let info = self.vmcb().control.exit_int_info;
+        if  info & (1 << 31) == 0 {
+            return None;
+        }
+
+        let typ    = ((info >> 8) & 0b111) as u8;
+        let vector = ((info >> 0) &  0xff) as u8;
+
+        let error_code = if info & (1 << 11) != 0 {
+            Some((info >> 32) as u32)
+        } else {
+            None
+        };
+
+        macro_rules! get_error_code {
+            () => { error_code.expect("Excpected error code but there isn't any") }
+        }
+
+        let event = match typ {
+            0 => Event::Intr(vector),
+            2 => Event::Nmi,
+            3 => {
+                let exception = match vector {
+                    0  => Exception::De,
+                    1  => Exception::Db,
+                    3  => Exception::Bp,
+                    4  => Exception::Of,
+                    5  => Exception::Br,
+                    6  => Exception::Ud,
+                    7  => Exception::Nm,
+                    8  => Exception::Df(get_error_code!()),
+                    10 => Exception::Ts(get_error_code!()),
+                    11 => Exception::Np(get_error_code!()),
+                    12 => Exception::Ss(get_error_code!()),
+                    13 => Exception::Gp(get_error_code!()),
+                    14 => Exception::Pf {
+                        address:    VirtAddr(self.reg(Register::Cr2)),
+                        error_code: get_error_code!(),
+                    },
+                    16 => Exception::Mf,
+                    17 => Exception::Ac(get_error_code!()),
+                    18 => Exception::Mc,
+                    19 => Exception::Xf,
+                    _  => panic!("Invalid exception vector {}.", vector),
+                };
+
+                Event::Exception(exception)
+            }
+            4 => Event::SoftwareInterrupt(vector),
+            _ => panic!("Invalid event type {}.", typ),
+        };
+
+        Some(event)
+    }
+
     fn vmcb_dirty(&mut self, bit: u32) {
         if self.support_vmcb_clean {
             // Unset the clean bit to mark that this part of VMCB has been modified.
@@ -526,7 +583,7 @@ impl Vm {
         }
     }
 
-    pub unsafe fn run(&mut self) -> VmExit {
+    pub unsafe fn run(&mut self) -> (VmExit, Option<Event>) {
         // Handle case where this VM is ran on different CPU than before (or is ran for the first
         // time).
         if core!().id != self.last_core {
@@ -705,7 +762,7 @@ impl Vm {
         const VMSA_BUSY:     u64 = !1;
         const INVALID_STATE: u64 = !0;
 
-        match exit_code {
+        let vmexit = match exit_code {
             0x00..=0x0f => VmExit::CrAccess { n: (exit_code - 0x00) as u8, write: false },
             0x10..=0x1f => VmExit::CrAccess { n: (exit_code - 0x10) as u8, write: true  },
             0x20..=0x2f => VmExit::DrAccess { n: (exit_code - 0x20) as u8, write: false },
@@ -815,7 +872,13 @@ impl Vm {
             VMSA_BUSY     => panic!("busy bit in VMSA"),
             INVALID_STATE => panic!("Invalid guest state in VMCB."),
             _             => panic!("Unknown VM exit code 0x{:x}.", exit_code),
-        }
+        };
+
+        // It is possible for an intercept to occur while the guest is attempting to
+        // deliver an exception or interrupt through the IDT.
+        let event = self.intercepted_delivery();
+
+        (vmexit, event)
     }
 
     pub fn reg(&self, register: Register) -> u64 {
@@ -1013,11 +1076,12 @@ impl Vm {
         state.limit = table.limit as u32;
     }
 
+    /// Request to flush guest TLB entries on next run.
     pub fn flush_tlb(&mut self) {
-        // Flush guest TLB entries on the next run.
         self.vmcb_mut().control.tlb_control = self.flush_tlb_value;
     }
 
+    /// Inject event into guest.
     pub fn inject_event(&mut self, event: Event) {
         let (typ, error_code, vector): (u32, Option<u32>, u8) = match event {
             Event::Intr(vector)              => (0, None, vector),

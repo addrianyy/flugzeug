@@ -143,7 +143,7 @@ impl VKernel {
             Intercept::Invlpga,
 
             // Intercept other instructions.
-            Intercept::Xsetbv, Intercept::Hlt,
+            Intercept::Xsetbv, Intercept::Hlt, Intercept::Invlpgb,
 
             // Intercept reads and writed of relevant CRs.
             Intercept::Cr0Read, Intercept::Cr0Write,
@@ -163,7 +163,11 @@ impl VKernel {
 
     pub fn run(&mut self) -> VmExit {
         loop {
-            let exit = unsafe { self.vm.run() };
+            let (exit, delivery) = unsafe { self.vm.run() };
+
+            if let Some(delivery) = delivery {
+                panic!("Intercepted delivery of {:?}.", delivery);
+            }
 
             if let VmExit::Exception(Exception::Pf { address, error_code }) = exit {
                 // We can only handle page faults due to missing page. Other page faults
