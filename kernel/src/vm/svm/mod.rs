@@ -268,8 +268,8 @@ pub enum Exception {
     Br,
     Ud,
     Nm,
-    Df,
-    Ts,
+    Df(u32),
+    Ts(u32),
     Np(u32),
     Ss(u32),
     Gp(u32),
@@ -340,6 +340,13 @@ pub enum VmExit {
     IllegalInvlpgp,
     Invpcid,
     Mcommit,
+}
+
+pub enum Event {
+    Intr(u8),
+    Nmi,
+    Exception(Exception),
+    SoftwareInterrupt(u8),
 }
 
 pub struct Vm {
@@ -479,9 +486,6 @@ impl Vm {
 
         // We don't support virtual interrupts for now.
         control.vintr = 0;
-
-        // We don't support interrupt shadow for now.
-        control.interrupt_shadow = 0;
 
         // Enable nested paging and set nested page table CR3. Don't setup any encryption.
         control.np_control = 1;
@@ -717,8 +721,8 @@ impl Vm {
                     5  => Exception::Br,
                     6  => Exception::Ud,
                     7  => Exception::Nm,
-                    8  => Exception::Df,
-                    10 => Exception::Ts,
+                    8  => Exception::Df(0),
+                    10 => Exception::Ts(error_code & 0xffff),
                     11 => Exception::Np(error_code),
                     12 => Exception::Ss(error_code),
                     13 => Exception::Gp(error_code),
@@ -1014,6 +1018,54 @@ impl Vm {
         self.vmcb_mut().control.tlb_control = self.flush_tlb_value;
     }
 
+    pub fn inject_event(&mut self, event: Event) {
+        let (typ, error_code, vector): (u32, Option<u32>, u8) = match event {
+            Event::Intr(vector)              => (0, None, vector),
+            Event::Nmi                       => (2, None, 2),
+            Event::SoftwareInterrupt(vector) => (4, None, vector),
+            Event::Exception(exception)      => {
+                let (vector, error_code) = match exception {
+                    Exception::De     => (0,  None),
+                    Exception::Db     => (1,  None),
+                    Exception::Bp     => (3,  None),
+                    Exception::Of     => (4,  None),
+                    Exception::Br     => (5,  None),
+                    Exception::Ud     => (6,  None),
+                    Exception::Nm     => (7,  None),
+                    Exception::Df(ec) => (8,  Some(ec)),
+                    Exception::Ts(ec) => (10, Some(ec)),
+                    Exception::Np(ec) => (11, Some(ec)),
+                    Exception::Ss(ec) => (12, Some(ec)),
+                    Exception::Gp(ec) => (13, Some(ec)),
+                    Exception::Pf { address, error_code } => {
+                        self.set_reg(Register::Cr2, address.0);
+
+                        (14, Some(error_code))
+                    }
+                    Exception::Mf     => (16, None),
+                    Exception::Ac(ec) => (17, Some(ec)),
+                    Exception::Mc     => (18, None),
+                    Exception::Xf     => (19, None),
+                };
+
+                (3, error_code, vector)
+            }
+        };
+
+        let mut injection: u64 = 0;
+
+        injection |= (vector as u64 &  0xff) << 0;
+        injection |= (typ    as u64 & 0b111) << 8;
+        injection |= 1                       << 31;
+
+        if let Some(error_code) = error_code {
+            injection |= (error_code as u64) << 32;
+            injection |= 1 << 11;
+        }
+
+        self.vmcb_mut().control.event_injection = injection;
+    }
+
     fn vmcb(&self) -> &Vmcb {
         &self.guest_vmcb
     }
@@ -1053,5 +1105,9 @@ impl Vm {
     pub fn set_tsc_offset(&mut self, offset: u64) {
         self.vmcb_dirty(CLEAN_INTERCEPTS_AND_TSC);
         self.vmcb_mut().control.tsc_offset = offset;
+    }
+
+    pub fn in_interrupt_shadow(&self) -> bool {
+        self.vmcb().control.interrupt_shadow != 0
     }
 }
