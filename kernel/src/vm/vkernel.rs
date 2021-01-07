@@ -139,8 +139,8 @@ impl VKernel {
             Intercept::Pf,
 
             // Intercept relevant SVM instructions.
-            Intercept::Vmmcall, Intercept::Stgi, Intercept::Clgi, Intercept::Skinit,
-            Intercept::Invlpga,
+            Intercept::Vmmcall, Intercept::Vmload, Intercept::Vmsave, Intercept::Stgi,
+            Intercept::Clgi, Intercept::Skinit, Intercept::Invlpga,
 
             // Intercept other instructions.
             Intercept::Xsetbv, Intercept::Hlt, Intercept::Invlpgb,

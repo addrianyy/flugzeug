@@ -12,33 +12,62 @@ pub struct VmcbSegmentDescriptor {
 
 #[repr(C)]
 pub struct VmcbControlArea {
-    pub intercept_cr_rw:           u32,
-    pub intercept_dr_rw:           u32,
-    pub intercept_exceptions:      u32,
-    pub intercept_misc_1:          u32,
-    pub intercept_misc_2:          u32,
-    pub intercept_misc_3:          u32,
-    reserved_1:                    [u8; 0x3c - 0x18],
-    pub pause_filter_threshold:    u16,
-    pub pause_filter_count:        u16,
-    pub iopm_base_pa:              u64,
-    pub msrpm_base_pa:             u64,
-    pub tsc_offset:                u64,
-    pub guest_asid:                u32,
-    pub tlb_control:               u32,
-    pub vintr:                     u64,
-    pub interrupt_shadow:          u64,
-    pub exitcode:                  u64,
-    pub exit_info_1:               u64,
-    pub exit_info_2:               u64,
-    pub exit_int_info:             u64,
-    pub np_control:                u64,
-    pub avic_apic_bar:             u64,
-    pub ghcb_pa:                   u64,
-    pub event_injection:           u64,
-    pub n_cr3:                     u64,
-    pub lbr_virtualization_enable: u64,
-    pub vmcb_clean:                u64,
+    // Various intercepts (register reads, writes, instructions, interrupts, etc).
+    pub intercept_cr_rw:      u32,
+    pub intercept_dr_rw:      u32,
+    pub intercept_exceptions: u32,
+    pub intercept_misc_1:     u32,
+    pub intercept_misc_2:     u32,
+    pub intercept_misc_3:     u32,
+
+    reserved_1: [u8; 0x3c - 0x18],
+
+    // Pause intercept filtering.
+    pub pause_filter_threshold: u16,
+    pub pause_filter_count:     u16,
+
+    // Physical addresses of intercept bitmaps (for IO and MSRs).
+    pub iopm_base_pa:  u64,
+    pub msrpm_base_pa: u64,
+
+    // Offset that gets added to current TSC when guest reads it.
+    pub tsc_offset: u64,
+
+    // Address space identifier used for TLB tagging.
+    pub guest_asid: u32,
+
+    // Control value that determines what to flush on next `vmrun`.
+    pub tlb_control: u32,
+
+    // Things related to virtual interrupts, VGIF and AVIC.
+    pub vintr: u64,
+
+    // Guest interruptability state.
+    pub interruptibility: u64,
+
+    // Detailed information about VM exit.
+    pub exitcode:      u64,
+    pub exit_info_1:   u64,
+    pub exit_info_2:   u64,
+    pub exit_int_info: u64,
+
+    // Bits to enable various SVM features like nested paging.
+    pub feature_control: u64,
+
+    pub avic_apic_bar: u64,
+    pub ghcb_pa:       u64,
+
+    // Field used to inject events (interrupts, NMIs, exceptions) to the guest.
+    pub event_injection: u64,
+
+    // Nested page table CR3 to use for nested paging.
+    pub n_cr3: u64,
+
+    // Bits to enable various virtualized features like vmsave/vmload, LBR virtualization.
+    pub virtualized_features: u64,
+
+    // Clean bits in VMCB that CPU can get from cache on next `vmrun`.
+    pub vmcb_clean: u64,
 
     // The next sequential instruction pointer (nRIP) saved on all #VMEXITs that are due to
     // instruction intercepts, as defined in section 15.9, as well as MSR and IOIO intercepts
@@ -51,13 +80,18 @@ pub struct VmcbControlArea {
     pub bytes_fetched:           u8,
     pub guest_instruction_bytes: [u8; 15],
 
-    pub apic_backing_page:         u64,
-    reserved_2:                    u64,
-    pub avic_logical_table:        u64,
-    pub avic_physical_table:       u64,
-    reserved_3:                    u64,
-    pub vmsa_pointer:              u64,
-    reserved_4:                    [u8; 0x400 - 0x110],
+    // Things related to AVIC.
+    pub apic_backing_page:   u64,
+    reserved_2:              u64,
+    pub avic_logical_table:  u64,
+    pub avic_physical_table: u64,
+
+    reserved_3: u64,
+
+    // Encrypted save state area, used when SEV-ES is enabled.
+    pub vmsa_pointer: u64,
+
+    reserved_4: [u8; 0x400 - 0x110],
 }
 
 #[repr(C)]

@@ -489,8 +489,8 @@ impl Vm {
         control.vintr = 0;
 
         // Enable nested paging and set nested page table CR3. Don't setup any encryption.
-        control.np_control = 1;
-        control.n_cr3      = n_cr3;
+        control.feature_control = 1;
+        control.n_cr3           = n_cr3;
 
         // AVIC, GHCB, VMSA, LBR virtualization, VMCB clean bits aren't used.
 
@@ -1176,6 +1176,6 @@ impl Vm {
     }
 
     pub fn in_interrupt_shadow(&self) -> bool {
-        self.vmcb().control.interrupt_shadow != 0
+        (self.vmcb().control.interruptibility & 1) == 1
     }
 }

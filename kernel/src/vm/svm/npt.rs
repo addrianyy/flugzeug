@@ -16,8 +16,9 @@ pub struct Npt {
 
 impl Npt {
     pub(super) fn new() -> Self {
+        // Don't invalidate TLB on modifications.
         Self {
-            page_table: PageTable::new(&mut mm::PhysicalMemory)
+            page_table: PageTable::new_advanced(&mut mm::PhysicalMemory, false)
                 .expect("Failed to allocate NPT for the VM."),
         }
     }

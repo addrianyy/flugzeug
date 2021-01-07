@@ -86,11 +86,14 @@ pub enum PageType {
 pub struct PageTable {
     /// Physical address of a root table (PML4), Must be always valid.
     table: PhysAddr,
+
+    /// Set to true if modifications to page table require TLB invalidation.
+    invalidate_tlb: bool,
 }
 
 impl PageTable {
     /// Create a new, empty page table witout any mapped memory.
-    pub fn new(phys_mem: &mut impl PhysMem) -> Option<Self> {
+    pub fn new_advanced(phys_mem: &mut impl PhysMem, invalidate_tlb: bool) -> Option<Self> {
         // Allocate empty root table (PML4).
         let table = phys_mem.alloc_phys_zeroed(
             Layout::from_size_align(4096, 4096).ok()?,
@@ -98,14 +101,21 @@ impl PageTable {
 
         Some(Self {
             table,
+            invalidate_tlb,
         })
     }
 
+    /// Create a new, empty page table witout any mapped memory.
+    pub fn new(phys_mem: &mut impl PhysMem) -> Option<Self> {
+        Self::new_advanced(phys_mem, true)
+    }
+
     /// Create a page table from PML4 physical address (eg. CR3).
-    pub unsafe fn from_table(table: PhysAddr) -> Self {
+    pub unsafe fn from_table(table: PhysAddr, invalidate_tlb: bool) -> Self {
         // Mask off VPID and other stuff from CR3.
         Self {
             table: PhysAddr(table.0 & 0xffffffffff000),
+            invalidate_tlb,
         }
     }
 
@@ -309,13 +319,15 @@ impl PageTable {
                 if entry & PAGE_PRESENT == 0 || update {
                     *entry_ptr = raw;
 
-                    // Check if we can access this virtual address in current processor mode.
-                    let accessible = (virt_addr.0 as u64) <= (usize::MAX as u64);
+                    if self.invalidate_tlb {
+                        // Check if we can access this virtual address in current processor mode.
+                        let accessible = (virt_addr.0 as u64) <= (usize::MAX as u64);
 
-                    // If the entry was already present and virtual address is accessible then
-                    // we need to flush TLB.
-                    if entry & PAGE_PRESENT != 0 && accessible {
-                        cpu::invlpg(virt_addr.0 as usize);
+                        // If the entry was already present and virtual address is accessible then
+                        // we need to flush TLB.
+                        if entry & PAGE_PRESENT != 0 && accessible {
+                            cpu::invlpg(virt_addr.0 as usize);
+                        }
                     }
 
                     return Some(());
