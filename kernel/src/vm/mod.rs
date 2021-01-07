@@ -154,7 +154,7 @@ fn run_kernel_in_vm() {
 
         // Intercept other stuff.
         Intercept::FerrFreeze,
-    ]);
+    ], true);
 
     let mut mapped_pages = 0;
 

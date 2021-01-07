@@ -306,6 +306,27 @@ pub enum Exception {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AddressSize {
+    Bits16,
+    Bits32,
+    Bits64,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum OperandSize {
+    Bits8,
+    Bits16,
+    Bits32,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct IoString {
+    pub address_size: AddressSize,
+    pub rep:          bool,
+    pub segment:      SegmentRegister,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum VmExit {
     NestedPageFault {
         address:  GuestAddr,
@@ -327,7 +348,8 @@ pub enum VmExit {
     GdtrAccess { write: bool },
     LdtrAccess { write: bool },
     TrAccess   { write: bool },
-    Msr        { write: bool, msr: u32 },
+    Msr        { write: bool, msr:  u32 },
+    Io         { write: bool, port: u16, operand_size: OperandSize, string: Option<IoString> },
     Rdtsc,
     Rdpmc,
     Pushf,
@@ -342,7 +364,6 @@ pub enum VmExit {
     Invlpg,
     Invlpga,
     FerrFreeze,
-    Io,
     Shutdown,
     Vmrun,
     Vmmcall,
@@ -600,7 +621,7 @@ impl Vm {
         }
     }
 
-    pub fn intercept(&mut self, intercepts: &[Intercept]) {
+    pub fn intercept(&mut self, intercepts: &[Intercept], enable: bool) {
         self.vmcb_dirty(CLEAN_INTERCEPTS_AND_TSC);
 
         for &intercept in intercepts {
@@ -618,8 +639,13 @@ impl Vm {
                 _      => panic!("Invalid intercept encoding."),
             };
 
-            // Set the intercept bit.
-            *field |= 1 << (intercept & 0xff);
+            let mask = 1 << (intercept & 0xff);
+
+            if enable {
+                *field |= mask;
+            } else {
+                *field &= !mask;
+            }
         }
     }
 
@@ -653,6 +679,34 @@ impl Vm {
         for msr in msrs.into_iter() {
             self.intercept_msr(msr.to_integer(), read, write);
         }
+    }
+
+    pub fn intercept_port(&mut self, port: u16, enable: bool) {
+        let position = port;
+        let index    = (position / 8) as usize;
+        let bit      =  position % 8;
+
+        if enable {
+            self.iopm[index] |= 1 << bit;
+        } else {
+            self.iopm[index] &= !(1 << bit);
+        }
+    }
+
+    pub fn intercept_ports<P: ToInteger<u16>, I: IntoIterator<Item = P>>(
+        &mut self,
+        ports:  I,
+        enable: bool,
+    ) {
+        for port in ports.into_iter() {
+            self.intercept_port(port.to_integer(), enable);
+        }
+    }
+
+    pub fn intercept_all_ports(&mut self, enable: bool) {
+        let value = if enable { 0xff } else { 0x00 };
+
+        self.iopm[..8192].iter_mut().for_each(|b| *b = value);
     }
 
     pub unsafe fn run(&mut self) -> (VmExit, Option<Event>) {
@@ -895,7 +949,55 @@ impl Vm {
             0x78        => VmExit::Hlt,
             0x79        => VmExit::Invlpg,
             0x7a        => VmExit::Invlpga,
-            0x7b        => VmExit::Io,
+            0x7b        => {
+                let operand_size = if exit_info_1 & (1 << 4) != 0 {
+                    OperandSize::Bits8
+                } else if exit_info_1 & (1 << 5) != 0 {
+                    OperandSize::Bits16
+                } else if exit_info_1 & (1 << 6) != 0 {
+                    OperandSize::Bits32
+                } else {
+                    panic!("Invalid IO port access operand size.");
+                };
+
+                let string = if exit_info_1 & (1 << 2) != 0 {
+                    let address_size = if exit_info_1 & (1 << 7) != 0 {
+                        AddressSize::Bits16
+                    } else if exit_info_1 & (1 << 8) != 0 {
+                        AddressSize::Bits32
+                    } else if exit_info_1 & (1 << 9) != 0 {
+                        AddressSize::Bits64
+                    } else {
+                        panic!("Invalid IO port access address size.");
+                    };
+
+                    let rep     = exit_info_1 & (1 << 3) != 0;
+                    let segment = match (exit_info_1 >> 10) & 0b111 {
+                        0 => SegmentRegister::Es,
+                        1 => SegmentRegister::Cs,
+                        2 => SegmentRegister::Ss,
+                        3 => SegmentRegister::Ds,
+                        4 => SegmentRegister::Fs,
+                        5 => SegmentRegister::Gs,
+                        _ => panic!("Invalid effective segment."),
+                    };
+
+                    Some(IoString {
+                        rep,
+                        address_size,
+                        segment,
+                    })
+                } else {
+                    None
+                };
+
+                VmExit::Io {
+                    write: exit_info_1 & 1 == 0,
+                    port:  (exit_info_1 >> 16) as u16,
+                    operand_size,
+                    string,
+                }
+            }
             0x7c        => VmExit::Msr {
                 msr:   self.reg(Register::Rcx) as u32,
                 write: exit_info_1 == 1,

@@ -158,7 +158,7 @@ impl VKernel {
 
             // Intercept other stuff.
             Intercept::FerrFreeze,
-        ]);
+        ], true);
     }
 
     pub fn run(&mut self) -> VmExit {
