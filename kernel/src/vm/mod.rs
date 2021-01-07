@@ -12,7 +12,6 @@ unsafe fn guest_entrypoint() -> ! {
 
     asm!(r#"
         mov eax, 0x1337
-        int3
         vmmcall
     "#);
 
@@ -140,23 +139,6 @@ fn run_kernel_in_vm() {
     }
 
     vm.intercept(&[
-        Intercept::De,
-        Intercept::Db,
-        Intercept::Of,
-        Intercept::Br,
-        Intercept::Ud,
-        Intercept::Nm,
-        Intercept::Df,
-        Intercept::Ts,
-        Intercept::Np,
-        Intercept::Ss,
-        Intercept::Gp,
-        Intercept::Pf,
-        Intercept::Mf,
-        Intercept::Ac,
-        Intercept::Mc,
-        Intercept::Xf,
-
         // Intercept relevant SVM instructions.
         Intercept::Vmmcall, Intercept::Stgi, Intercept::Clgi, Intercept::Skinit,
         Intercept::Invlpga,

@@ -550,6 +550,12 @@ impl Vm {
             _ => panic!("Invalid event type {}.", typ),
         };
 
+        if let Event::Exception(_) = event {
+        } else {
+            // Non-exception interrupts cannot have error codes.
+            assert!(error_code.is_none(), "Error code valid for non-exception event.");
+        }
+
         Some(event)
     }
 
@@ -1076,12 +1082,10 @@ impl Vm {
         state.limit = table.limit as u32;
     }
 
-    /// Request to flush guest TLB entries on next run.
     pub fn flush_tlb(&mut self) {
         self.vmcb_mut().control.tlb_control = self.flush_tlb_value;
     }
 
-    /// Inject event into guest.
     pub fn inject_event(&mut self, event: Event) {
         let (typ, error_code, vector): (u32, Option<u32>, u8) = match event {
             Event::Intr(vector)              => (0, None, vector),
