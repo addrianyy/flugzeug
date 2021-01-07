@@ -13,6 +13,28 @@ use utils::{XsaveArea, SvmFeatures, Asid};
 use vmcb::Vmcb;
 use npt::{Npt, GuestAddr, VirtAddr};
 
+pub trait ToInteger<T> {
+    fn to_integer(&self) -> T;
+}
+
+macro_rules! impl_to_integer {
+    ($type: ty) => {
+        impl ToInteger<$type> for $type {
+            fn to_integer(&self) -> $type { *self }
+        }
+
+        impl ToInteger<$type> for &$type {
+            fn to_integer(&self) -> $type { **self }
+        }
+
+        impl ToInteger<$type> for &mut $type {
+            fn to_integer(&self) -> $type { **self }
+        }
+    }
+}
+
+impl_to_integer!(u32);
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum VmError {
     NonAmdCpu,
@@ -305,7 +327,7 @@ pub enum VmExit {
     GdtrAccess { write: bool },
     LdtrAccess { write: bool },
     TrAccess   { write: bool },
-    Msr        { write: bool },
+    Msr        { write: bool, msr: u32 },
     Rdtsc,
     Rdpmc,
     Pushf,
@@ -601,6 +623,38 @@ impl Vm {
         }
     }
 
+    pub fn intercept_msr(&mut self, msr: u32, read: bool, write: bool) {
+        let position = match msr {
+            0x0000_0000..=0x0000_1fff => 8 * 0x0000 + (msr - 0x0000_0000) * 2,
+            0xc000_0000..=0xc000_1fff => 8 * 0x0800 + (msr - 0xc000_0000) * 2,
+            0xc001_0000..=0xc001_1fff => 8 * 0x1000 + (msr - 0xc001_0000) * 2,
+            _ => {
+                panic!("Specified MSR ({:x}) is outside of supported range and is \
+                       intercepted by default.", msr);
+            }
+        };
+
+        let index = (position / 8) as usize;
+        let bit   =  position % 8;
+
+        // First clear intercepts for this MSR.
+        self.msrpm[index] &= !(0b11 << bit);
+
+        // Set new intercepts for this MSR.
+        self.msrpm[index] |= (read as u8) << (bit + 0) | (write as u8) << (bit + 1);
+    }
+
+    pub fn intercept_msrs<M: ToInteger<u32>, I: IntoIterator<Item = M>>(
+        &mut self,
+        msrs:  I,
+        read:  bool,
+        write: bool,
+    ) {
+        for msr in msrs.into_iter() {
+            self.intercept_msr(msr.to_integer(), read, write);
+        }
+    }
+
     pub unsafe fn run(&mut self) -> (VmExit, Option<Event>) {
         // Handle case where this VM is ran on different CPU than before (or is ran for the first
         // time).
@@ -842,7 +896,10 @@ impl Vm {
             0x79        => VmExit::Invlpg,
             0x7a        => VmExit::Invlpga,
             0x7b        => VmExit::Io,
-            0x7c        => VmExit::Msr { write: exit_info_1 == 1 },
+            0x7c        => VmExit::Msr {
+                msr:   self.reg(Register::Rcx) as u32,
+                write: exit_info_1 == 1,
+            },
             0x7d        => unreachable!("task switch"),
             0x7e        => VmExit::FerrFreeze,
             0x7f        => VmExit::Shutdown,
