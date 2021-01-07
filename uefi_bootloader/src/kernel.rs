@@ -229,6 +229,9 @@ fn create_kernel_page_table(kernel: &Elf, page_type: PageType) -> PageTable {
 }
 
 fn load_kernel() -> KernelEntryData {
+    // To avoid memory fragmentation:
+    // Allocate all boot memory first, then allocate kernel memory.
+
     // AP entrypoint needs to be in low memory so we must create it before doing any other
     // allocations.
     let mut ap_entrypoint = unsafe { APEntrypoint::new() };
@@ -265,14 +268,6 @@ fn load_kernel() -> KernelEntryData {
     // Create a page table that will be used when transitioning to the kernel.
     let mut trampoline_page_table = create_trampoline_page_table(max_page_type);
 
-    // Create a page table that will be used by the kernel. It will already contain a
-    // mapped in kernel.
-    let mut kernel_page_table = create_kernel_page_table(&kernel, max_page_type);
-
-    // Get bases of both page tables.
-    let kernel_cr3     = kernel_page_table.table().0;
-    let trampoline_cr3 = trampoline_page_table.table().0;
-
     let gdt = mm::allocate_boot_memory(4096, 8)
         .expect("Failed to allocate GDT.");
 
@@ -281,6 +276,16 @@ fn load_kernel() -> KernelEntryData {
     let trampoline_stack = mm::allocate_boot_memory(4096, 8)
         .expect("Failed to allocate trampoline stack.");
     let trampoline_rsp = trampoline_stack as u64 + 4096;
+
+    // All boot memory is allocated, now allocate kernel memory.
+
+    // Create a page table that will be used by the kernel. It will already contain a
+    // mapped in kernel.
+    let mut kernel_page_table = create_kernel_page_table(&kernel, max_page_type);
+
+    // Get bases of both page tables.
+    let kernel_cr3     = kernel_page_table.table().0;
+    let trampoline_cr3 = trampoline_page_table.table().0;
 
     unsafe {
         ap_entrypoint.finalize_and_register(trampoline_cr3);

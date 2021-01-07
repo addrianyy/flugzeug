@@ -141,6 +141,14 @@ impl RangeSet {
     pub fn allocate_limited(&mut self, size: u64, align: u64, max_address: Option<u64>)
         -> Option<usize> 
     {
+        #[derive(Copy, Clone)]
+        struct Candidate {
+            padding: u64,
+            start:   u64,
+            end:     u64,
+            size:    u64,
+        }
+
         // Zero-sized allocations are not allowed.
         if size == 0 {
             return None;
@@ -154,64 +162,85 @@ impl RangeSet {
         // Calculate alignment mask, this can be done because alignment is always power of two.
         let align_mask = align - 1;
 
+        // Calculate maximum allocation address.
         let max_address = max_address.unwrap_or(usize::MAX as u64);
         let max_address = max_address.min(usize::MAX as u64);
 
-        let mut allocation: Option<(u64, u32, u64, u64)> = None;
+        let mut allocation: Option<Candidate> = None;
 
         // Try to find the best region for new allocation.
         for idx in 0..self.used as usize {
-            let current = self.ranges[idx];
+            let current     = self.ranges[idx];
+            let region_size = current.size();
 
             // Calculate the amount of bytes required for front padding to satifsy
             // alignment requirements.
             let padding = (align - (current.start & align_mask)) & align_mask;
 
-            // Calculate the actual end of allocation acounting for alignment.
-            let actual_end = current.start.checked_add(size - 1)?.checked_add(padding)?;
+            // Verify that calculated padding is correct.
+            assert!(padding < align && (current.start + padding) & align_mask == 0,
+                    "Calculated padding {} is incorrect.", padding);
+
+            // Calculate the actual end of the allocation acounting for alignment.
+            let allocation_end = current.start.checked_add(size - 1)?.checked_add(padding)?;
 
             // Make sure that the allocation will fit in this region.
-            if actual_end > current.end {
+            if allocation_end > current.end {
                 continue;
             }
 
-            // Make sure that this memory can be accessed by the processor in it's current state.
-            // This library will be used by both 32 bit and 64 bit code.
-            if actual_end > max_address {
+            // Make sure that this memory can be accessed by the processor in its current state.
+            if allocation_end > max_address {
                 continue;
             }
-
-            // Get the power of 2 of this region alignment.
-            let region_align_power = current.start.trailing_zeros();
 
             // Check if this region is better than current best.
             let replace = if let Some(allocation) = allocation {
-                if allocation.0 == padding {
-                    // If both regions waste the same amount of space, pick one with
-                    // smaller alignment.
-                    allocation.1 > region_align_power
+                if allocation.padding == padding {
+                    // If both regions waste the same amount of space, pick one which
+                    // is smaller. This will avoid fragmentation.
+                    allocation.size > region_size
                 } else {
                     // Choose region which wastes less space.
-                    allocation.0 > padding
+                    allocation.padding > padding
                 }
             } else {
                 true
             };
 
-            // Current region is better then the previous best, replace it.
             if replace {
-                allocation = Some((padding, region_align_power, current.start, actual_end));
+                // Current region is better then previous best, replace it.
+                allocation = Some(Candidate {
+                    padding,
+                    start: current.start,
+                    end:   allocation_end,
+                    size:  region_size,
+                });
             }
         }
 
-        allocation.map(|(padding, _, start, end)| {
-            // We found good region to allocate and it should be removed from the set.
-            // Although padding space is not used, we will remove it too to avoid too big
-            // fragmentation in the set.
-            self.remove(Range { start, end });
+        allocation.map(|candidate| {
+            let start = candidate.start;
+            let end   = candidate.end;
+
+            // We have found good region to allocate and it should be removed from the set.
+            // If padding is not too high we remove it too to avoid fragmentation.
+            let range = if candidate.padding >= 512 {
+                Range {
+                    start: start + candidate.padding,
+                    end,
+                }
+            } else {
+                Range {
+                    start,
+                    end,
+                }
+            };
+
+            self.remove(range);
 
             // Align address before returning it.
-            (start + padding) as usize
+            (start + candidate.padding) as usize
         })
     }
 
