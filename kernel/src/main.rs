@@ -9,6 +9,7 @@ extern crate alloc;
 #[macro_use] mod print;
 mod vm;
 mod mm;
+mod once;
 mod apic;
 mod acpi;
 mod font;

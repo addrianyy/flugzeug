@@ -90,6 +90,7 @@ pub struct SvmFeatures {
     pub nrip_save:      bool,
     pub nested_paging:  bool,
     pub vmcb_clean:     bool,
+    pub flush_by_asid:  bool,
 }
 
 impl SvmFeatures {
@@ -104,6 +105,7 @@ impl SvmFeatures {
 
         features.nr_asids       = cpuid.ebx;
         features.decode_assists = (cpuid.edx & (1 << 7)) != 0;
+        features.flush_by_asid  = (cpuid.edx & (1 << 6)) != 0;
         features.vmcb_clean     = (cpuid.edx & (1 << 5)) != 0;
         features.nrip_save      = (cpuid.edx & (1 << 3)) != 0;
         features.nested_paging  = (cpuid.edx & (1 << 0)) != 0;

@@ -7,6 +7,7 @@ mod utils;
 use core::fmt;
 
 use crate::mm::PhysicalPage;
+use crate::once::Once;
 
 use utils::{XsaveArea, SvmFeatures, Asid};
 use vmcb::Vmcb;
@@ -366,6 +367,9 @@ pub struct Vm {
 
     /// Last core this VM was run at. !0 if this VM wasn't run.
     last_core: u64,
+
+    /// Value to set `tlb_control` to to flush guest TLB.
+    flush_tlb_value: u32,
 }
 
 const CLEAN_INTERCEPTS_AND_TSC: u32 = 0;
@@ -400,6 +404,7 @@ impl Vm {
             asid,
             support_vmcb_clean: false,
             last_core:          !0,
+            flush_tlb_value:    0,
         };
 
         vm.initialize(&features)?;
@@ -408,6 +413,9 @@ impl Vm {
     }
 
     fn initialize(&mut self, features: &SvmFeatures) -> Result<(), VmError> {
+        static WARNING_FLUSH_BY_ASID: Once = Once::new();
+        static WARNING_VMCB_CLEAN:    Once = Once::new();
+
         // Make sure that all required SVM features are supported.
         {
             if !features.nested_paging {
@@ -419,8 +427,29 @@ impl Vm {
             }
         }
 
+        self.flush_tlb_value = match features.flush_by_asid {
+            true => {
+                // Flush this guest's TLB entries.
+                3
+            }
+            false => {
+                WARNING_FLUSH_BY_ASID.exec(|| {
+                    color_println!(0xffff00, "WARNING: SVM flush by ASID is not supported.");
+                });
+
+                // Flush entire TLB (Should be used only on legacy hardware).
+                1
+            }
+        };
+
         // Check if this CPU supports VMCB clean.
         self.support_vmcb_clean = features.vmcb_clean;
+
+        if !features.vmcb_clean {
+            WARNING_VMCB_CLEAN.exec(|| {
+                color_println!(0xffff00, "WARNING: SVM VMCB clean is not supported.");
+            });
+        }
 
         let n_cr3 = self.npt.table().0;
         let asid  = self.asid.get();
@@ -982,7 +1011,7 @@ impl Vm {
 
     pub fn flush_tlb(&mut self) {
         // Flush guest TLB entries on the next run.
-        self.vmcb_mut().control.tlb_control = 3;
+        self.vmcb_mut().control.tlb_control = self.flush_tlb_value;
     }
 
     fn vmcb(&self) -> &Vmcb {
@@ -1006,7 +1035,15 @@ impl Vm {
     }
 
     pub fn next_rip(&self) -> u64 {
-        self.vmcb().control.next_rip
+        let next_rip = self.vmcb().control.next_rip;
+
+        // The next sequential instruction pointer (nRIP) is saved in the guest VMCB control area
+        // at location C8h on all #VMEXITs that are due to instruction intercepts, as defined
+        // in section 15.9, as well as MSR and IOIO intercepts and exceptions caused by the
+        // INT3, INTO, and BOUND instructions. For all other intercepts, nRIP is reset to zero.
+        assert!(next_rip != 0, "Tried to use next RIP in invalid context.");
+
+        next_rip
     }
 
     pub fn tsc_offset(&self) -> u64 {

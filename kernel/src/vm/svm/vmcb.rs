@@ -39,9 +39,18 @@ pub struct VmcbControlArea {
     pub n_cr3:                     u64,
     pub lbr_virtualization_enable: u64,
     pub vmcb_clean:                u64,
-    pub next_rip:                  u64,
-    pub bytes_fetched:             u8,
-    pub guest_instruction_bytes:   [u8; 15],
+
+    // The next sequential instruction pointer (nRIP) saved on all #VMEXITs that are due to
+    // instruction intercepts, as defined in section 15.9, as well as MSR and IOIO intercepts
+    // and exceptions caused by the INT3, INTO, and BOUND instructions.
+    // For all other intercepts, nRIP is reset to zero.
+    pub next_rip: u64,
+
+    // Filled by the processor on the nested or intercepted page fault. Only available
+    // if decode assists are supported.
+    pub bytes_fetched:           u8,
+    pub guest_instruction_bytes: [u8; 15],
+
     pub apic_backing_page:         u64,
     reserved_2:                    u64,
     pub avic_logical_table:        u64,
