@@ -134,6 +134,9 @@ impl VKernel {
         self.vm.set_reg(Register::Rsp,    self.image.rsp);
         self.vm.set_reg(Register::Rflags, 2);
 
+        self.vm.intercept_all_msrs(true, true);
+        self.vm.intercept_all_ports(true);
+
         self.vm.intercept(&[
             // Intercept relevant exceptions.
             Intercept::Pf,

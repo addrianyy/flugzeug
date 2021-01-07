@@ -681,6 +681,22 @@ impl Vm {
         }
     }
 
+    pub fn intercept_all_msrs(&mut self, read: bool, write: bool) {
+        let mut value = 0;
+
+        for bit in (0..8).step_by(2) {
+            if read {
+                value |= 1 << (bit + 0);
+            }
+
+            if write {
+                value |= 1 << (bit + 1);
+            }
+        }
+
+        self.msrpm[..0x1800].iter_mut().for_each(|b| *b = value);
+    }
+
     pub fn intercept_port(&mut self, port: u16, enable: bool) {
         let position = port;
         let index    = (position / 8) as usize;
@@ -706,7 +722,7 @@ impl Vm {
     pub fn intercept_all_ports(&mut self, enable: bool) {
         let value = if enable { 0xff } else { 0x00 };
 
-        self.iopm[..8192].iter_mut().for_each(|b| *b = value);
+        self.iopm[..0x2000].iter_mut().for_each(|b| *b = value);
     }
 
     pub unsafe fn run(&mut self) -> (VmExit, Option<Event>) {
