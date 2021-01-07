@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod npt;
 mod vmcb;
 mod utils;
@@ -46,7 +48,6 @@ impl fmt::Debug for VmError {
 }
 
 // Don't change the numbers.
-#[allow(unused)]
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Register {
@@ -87,7 +88,6 @@ pub enum Register {
     Pat,
 }
 
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TableRegister {
     Gdt,
@@ -109,7 +109,6 @@ impl DescriptorTable {
     }
 }
 
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SegmentRegister {
     Es,
@@ -149,7 +148,6 @@ const DR_RW:  usize = 5 << 8;
 const EXC:    usize = 6 << 8;
 
 // Don't change the numbers.
-#[allow(unused)]
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Intercept {
@@ -472,8 +470,9 @@ impl Vm {
         }
     }
 
-    #[allow(unused)]
     pub fn intercept(&mut self, intercepts: &[Intercept]) {
+        self.vmcb_dirty(CLEAN_INTERCEPTS_AND_TSC);
+
         for &intercept in intercepts {
             let intercept = intercept as usize;
 
@@ -490,7 +489,7 @@ impl Vm {
             };
 
             // Set the intercept bit.
-            *field |= (1 << (intercept & 0xff));
+            *field |= 1 << (intercept & 0xff);
         }
     }
 
@@ -670,6 +669,9 @@ impl Vm {
         let exit_info_1 = control.exit_info_1;
         let exit_info_2 = control.exit_info_2;
 
+        const VMSA_BUSY:     u64 = !1;
+        const INVALID_STATE: u64 = !0;
+
         match exit_code {
             0x00..=0x0f => VmExit::CrAccess { n: (exit_code - 0x00) as u8, write: false },
             0x10..=0x1f => VmExit::CrAccess { n: (exit_code - 0x10) as u8, write: true  },
@@ -774,12 +776,12 @@ impl Vm {
                     execute,
                 }
             }
-            0x401       => unreachable!("AVIC incomplete IPI"),
-            0x402       => unreachable!("AVIC no acceleration"),
-            0x403       => unreachable!("VMGEXIT"),
-            0xffff_fffe => unreachable!("busy bit in VMSA"),
-            0xffff_ffff => panic!("Invalid guest state in VMCB."),
-            _           => panic!("Unknown VM exit code 0x{:x}.", exit_code),
+            0x401         => unreachable!("AVIC incomplete IPI"),
+            0x402         => unreachable!("AVIC no acceleration"),
+            0x403         => unreachable!("VMGEXIT"),
+            VMSA_BUSY     => panic!("busy bit in VMSA"),
+            INVALID_STATE => panic!("Invalid guest state in VMCB."),
+            _             => panic!("Unknown VM exit code 0x{:x}.", exit_code),
         }
     }
 
@@ -898,7 +900,6 @@ impl Vm {
         }
     }
 
-    #[allow(unused)]
     pub fn segment_reg(&self, register: SegmentRegister) -> Segment {
         use SegmentRegister::*;
 
@@ -953,7 +954,6 @@ impl Vm {
         state.selector = segment.selector;
     }
 
-    #[allow(unused)]
     pub fn table_reg(&mut self, register: TableRegister) -> DescriptorTable {
         let state = &self.vmcb().state;
         let table = match register {
@@ -993,32 +993,26 @@ impl Vm {
         &mut self.guest_vmcb
     }
 
-    #[allow(unused)]
     pub fn npt(&self) -> &Npt {
         &self.npt
     }
 
-    #[allow(unused)]
     pub fn npt_mut(&mut self) -> &mut Npt {
         &mut self.npt
     }
 
-    #[allow(unused)]
     pub fn cpl(&self) -> u8 {
         self.vmcb().state.cpl
     }
 
-    #[allow(unused)]
     pub fn next_rip(&self) -> u64 {
         self.vmcb().control.next_rip
     }
 
-    #[allow(unused)]
     pub fn tsc_offset(&self) -> u64 {
         self.vmcb().control.tsc_offset
     }
 
-    #[allow(unused)]
     pub fn set_tsc_offset(&mut self, offset: u64) {
         self.vmcb_dirty(CLEAN_INTERCEPTS_AND_TSC);
         self.vmcb_mut().control.tsc_offset = offset;

@@ -2,9 +2,9 @@ pub use page_table::{PageTable, PageType, PhysAddr, VirtAddr};
 
 use crate::mm;
 
-#[allow(unused)] pub const NPT_PRESENT: u64 = page_table::PAGE_PRESENT;
-#[allow(unused)] pub const NPT_WRITE:   u64 = page_table::PAGE_WRITE;
-#[allow(unused)] pub const NPT_NX:      u64 = page_table::PAGE_NX;
+pub const NPT_PRESENT: u64 = page_table::PAGE_PRESENT;
+pub const NPT_WRITE:   u64 = page_table::PAGE_WRITE;
+pub const NPT_NX:      u64 = page_table::PAGE_NX;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[repr(C)]
