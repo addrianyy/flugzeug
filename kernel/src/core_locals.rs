@@ -34,6 +34,38 @@ pub fn get_core_locals() -> &'static CoreLocals {
     }
 }
 
+struct DepthCounter {
+    depth: AtomicU32,
+}
+
+impl DepthCounter {
+    fn new(initial: u32) -> Self {
+        Self {
+            depth: AtomicU32::new(initial),
+        }
+    }
+
+    fn enter(&self) -> bool {
+        let previous = self.depth.fetch_add(1, Ordering::Relaxed);
+
+        previous.checked_add(1).expect("Integer overflow on depth counter");
+
+        previous == 0
+    }
+
+    fn exit(&self) -> bool {
+        let previous = self.depth.fetch_sub(1, Ordering::Relaxed);
+
+        previous.checked_sub(1).expect("Integer underflow on depth counter");
+
+        previous == 1
+    }
+
+    fn depth(&self) -> u32 {
+        self.depth.load(Ordering::Relaxed)
+    }
+}
+
 #[repr(C)]
 pub struct CoreLocals {
     /// Must be always the first field in the structure.
@@ -48,6 +80,10 @@ pub struct CoreLocals {
 
     /// Required size of the XSAVE area.
     xsave_size: AtomicUsize,
+
+    interrupts_disable: DepthCounter,
+    in_interrupt:       DepthCounter,
+    in_exception:       DepthCounter,
 
     /// Biggest page type supported on the system.
     pub max_page_type: PageType,
@@ -79,6 +115,57 @@ pub struct CoreLocals {
 }
 
 impl CoreLocals {
+    pub unsafe fn enter_interrupt(&self) { self.in_interrupt.enter(); }
+    pub unsafe fn exit_interrupt(&self)  { self.in_interrupt.exit();  }
+
+    pub unsafe fn enter_exception(&self) { self.in_exception.enter(); }
+    pub unsafe fn exit_exception(&self)  { self.in_exception.exit();  }
+
+    pub fn in_interrupt(&self) -> bool { self.in_interrupt.depth() > 0 }
+    pub fn in_exception(&self) -> bool { self.in_exception.depth() > 0 }
+
+    pub unsafe fn disable_interrupts(&self) {
+        // Increase interrupt disable counter.
+        self.interrupts_disable.enter();
+
+        // Unconditionally disable interrupts.
+        cpu::disable_interrupts();
+    }
+
+    pub unsafe fn enable_interrupts(&self) {
+        if self.interrupts_disable.exit() {
+            // Interrupt disable counter is now 0 which means we can reenable interrupts.
+            // If we had interrupts enabled when entering interrupt this number can go to 0.
+            // But as all interrupt handlers are interrupt gates interrupts there should be
+            // disabled and they will be enabled if needed by iret. Therefore we don't do anything
+            // if we are in interrupt handler (or exception handler).
+            if !self.in_interrupt() && !self.in_exception() {
+                cpu::enable_interrupts();
+            }
+        }
+    }
+
+    pub unsafe fn interrupts_enabled(&self) -> bool {
+        // Get the expected state of the interrupt flag.
+        let enabled = !self.in_interrupt() && !self.in_exception() &&
+            self.interrupts_disable.depth() == 0;
+
+        let rflags: u64;
+
+        asm!(
+            r#"
+                pushfq
+                pop {}
+            "#,
+            out(reg) rflags,
+        );
+
+        // Make sure that our expectations match reality.
+        assert!((rflags & (1 << 9) != 0) == enabled);
+
+        enabled
+    }
+
     pub unsafe fn free_list(&self, layout: Layout) -> &Lock<FreeList> {
         // Free lists start at 8 bytes, round it up if needed.
         let size = core::cmp::max(layout.size(), 8);
@@ -234,6 +321,10 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
         host_save_area: Lock::new(None),
         boot_block,
         max_page_type,
+        // We start with interrupts disabled so initial depth counter is 1.
+        interrupts_disable: DepthCounter::new(1),
+        in_interrupt:       DepthCounter::new(0),
+        in_exception:       DepthCounter::new(0),
         free_lists: [
             Lock::new(FreeList::new(0x0000000000000008)),
             Lock::new(FreeList::new(0x0000000000000010)),

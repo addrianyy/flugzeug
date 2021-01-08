@@ -1,5 +1,5 @@
 use super::svm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable,
-                 Segment, VmExit, Intercept, Exception};
+                 Segment, VmExit, Intercept, Exception, Interrupt};
 use super::svm::npt::{Npt, GuestAddr, PageType};
 
 use page_table::{PageTable, PhysMem, PhysAddr, VirtAddr};
@@ -132,7 +132,7 @@ impl VKernel {
         self.vm.set_reg(Register::Cr3,    self.page_table.table().0);
         self.vm.set_reg(Register::Rip,    self.image.entrypoint);
         self.vm.set_reg(Register::Rsp,    self.image.rsp);
-        self.vm.set_reg(Register::Rflags, 2);
+        self.vm.set_reg(Register::Rflags, (1 << 9) | 2);
 
         self.vm.intercept_all_msrs(true, true);
         self.vm.intercept_all_ports(true);
@@ -170,6 +170,10 @@ impl VKernel {
 
             if let Some(delivery) = delivery {
                 panic!("Intercepted delivery of {:?}.", delivery);
+            }
+
+            if let VmExit::Interrupt(Interrupt::Intr) = exit {
+                continue;
             }
 
             if let VmExit::Exception(Exception::Pf { address, error_code }) = exit {

@@ -2,7 +2,7 @@ mod svm;
 mod vkernel;
 
 use svm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable,
-          Segment, VmExit, Intercept};
+          Segment, VmExit, Intercept, Interrupt};
 use svm::npt::{self, GuestAddr, PageType};
 
 use vkernel::VKernel;
@@ -135,7 +135,7 @@ fn run_kernel_in_vm() {
         vm.set_reg(Register::Dr7,          0x0000_0400);
         vm.set_reg(Register::Rip,          guest_entrypoint as *const () as u64);
         vm.set_reg(Register::Rsp,          rsp);
-        vm.set_reg(Register::Rflags,       2);
+        vm.set_reg(Register::Rflags,       (1 << 9) | 2);
     }
 
     vm.intercept(&[
@@ -157,9 +157,11 @@ fn run_kernel_in_vm() {
     ], true);
 
     let mut mapped_pages = 0;
+    let mut interrupts   = 0;
 
     'run: loop {
         let (exit, delivery) = unsafe { vm.run() };
+
 
         let mut unhandled = false;
 
@@ -184,12 +186,16 @@ fn run_kernel_in_vm() {
             VmExit::Shutdown => {
                 panic!("VM shutdown because of event: {:?}", delivery.unwrap());
             }
+            VmExit::Interrupt(Interrupt::Intr) => {
+                interrupts += 1;
+                continue 'run;
+            }
             _ => unhandled = true,
         }
 
 
         if unhandled {
-            println!("Unhandled VM exit {:x?}.", exit)
+            panic!("Unhandled VM exit {:x?}.", exit)
         }
 
         if let Some(delivery) = delivery {
@@ -201,7 +207,7 @@ fn run_kernel_in_vm() {
         }
     }
 
-    println!("Done! Mapped in {} pages.", mapped_pages);
+    println!("Done! Mapped in {} pages. Interrupted {} times.", mapped_pages, interrupts);
 }
 
 fn run_vkernel_in_vm() {

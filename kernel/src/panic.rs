@@ -166,7 +166,8 @@ impl Drop for EmergencyWriter {
 }
 
 pub unsafe fn halt() -> ! {
-    // Make sure that nobody will interrupt us before we halt.
+    // Make sure that nobody will interrupt us before we halt. As we won't use any locks here
+    // we don't need to use `core!` macro to properly manager interrupt disable depth.
     cpu::disable_interrupts();
 
     if has_core_locals() {
@@ -182,9 +183,12 @@ unsafe fn begin_panic() -> bool {
     // Make sure to disable interrupts as system is in possibly invalid state.
     cpu::disable_interrupts();
 
-    // We have panicked very early and cannot NMI other cores. That's fine, all of them
-    // should be waiting for us.
-    if !has_core_locals() {
+    if has_core_locals() {
+        // If we have core locals we have to properly manage interrupt disable depth.
+        core!().disable_interrupts();
+    } else {
+        // We have panicked very early and cannot NMI other cores. That's fine, all of them
+        // should be waiting for us.
         return true;
     }
 

@@ -141,6 +141,7 @@ pub unsafe fn initialize() {
     let mut idt = Vec::with_capacity(256);
 
     // Fill whole interrupt table with gates that point to the `handle_interrupt` wrappers.
+    // We use interrupt gates everywhere so when handling interrupts `RFLAGS.IF` == 0.
     for int in 0..256 {
         let ist = match int {
             2 | 8 | 18 => {
@@ -258,6 +259,19 @@ fn panic_on_interrupt(vector: u8, frame: &InterruptFrame, error: u64, _regs: &Re
     }
 }
 
+fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
+                        _regs: &mut RegisterState) -> bool {
+    if vector == 123 {
+        unsafe {
+            crate::apic::Apic::eoi();
+        }
+
+        return true;
+    }
+
+    false
+}
+
 #[no_mangle]
 unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, error: u64,
                                       regs: &mut RegisterState) {
@@ -266,5 +280,42 @@ unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, er
         panic::halt();
     }
 
+    // Inform that we are now handling interrupt or exception.
+    let exception = vector < 32;
+    if  exception {
+        core!().enter_exception();
+    } else {
+        core!().enter_interrupt();
+    }
+
+    let handled = try_handle_interrupt(vector, frame, error, regs);
+    if  handled {
+        // Inform that we have finished handing interrupt or exception.
+        if exception {
+            core!().exit_exception();
+        } else {
+            core!().exit_interrupt();
+        }
+
+        return;
+    }
+
+    // Unhandled interrupt, panic.
     panic_on_interrupt(vector, frame, error, regs);
+}
+
+pub unsafe fn start_receiving() {
+    // We are now ready to receive interrupts.
+    core!().enable_interrupts();
+
+    // Make sure that we have actually enabled interrupts.
+    assert!(core!().interrupts_enabled(), "Failed to enable interrupts on the core.");
+
+    if let Some(apic) = core!().apic.lock().as_mut() {
+        let timer_lvt = 123 | (1 << 17);
+
+        use crate::apic::Register;
+        apic.write(Register::TimerInitialCount, 100_000);
+        apic.write(Register::TimerLvt,          timer_lvt);
+    }
 }

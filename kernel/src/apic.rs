@@ -4,6 +4,14 @@ use crate::mm;
 const IA32_APIC_BASE: u32 = 0x1b;
 const APIC_BASE:      u64 = 0xfee0_0000;
 
+pub enum Register {
+    ApicID                  = 0x20,
+    Eoi                     = 0xb0,
+    SpuriousInterruptVector = 0xf0,
+    TimerLvt                = 0x320,
+    TimerInitialCount       = 0x380,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ApicMode {
     XApic,
@@ -16,9 +24,16 @@ pub enum Apic {
 }
 
 impl Apic {
+    pub fn mode(&self) -> ApicMode {
+        match self {
+            Apic::XApic(..) => ApicMode::XApic,
+            Apic::X2Apic    => ApicMode::X2Apic,
+        }
+    }
+
     pub fn apic_id(&self) -> u32 {
         // Read the APIC ID register.
-        let apic_id = unsafe { self.read(0x20) };
+        let apic_id = unsafe { self.read(Register::ApicID) };
 
         // Adjust the APIC ID based on current APIC mode.
         match self {
@@ -57,15 +72,10 @@ impl Apic {
         }
     }
 
-    pub fn mode(&self) -> ApicMode {
-        match self {
-            Apic::XApic(..) => ApicMode::XApic,
-            Apic::X2Apic    => ApicMode::X2Apic,
-        }
-    }
-
     #[allow(dead_code)]
-    unsafe fn read(&self, offset: u32) -> u32 {
+    pub unsafe fn read(&self, register: Register) -> u32 {
+        let offset = register as u32;
+
         // Make sure that provided offset is a APIC valid register.
         assert!(offset < 0x400 && offset % 16 == 0, "Invalid APIC register passed to `read`.");
 
@@ -81,7 +91,9 @@ impl Apic {
     }
 
     #[allow(dead_code)]
-    unsafe fn write(&mut self, offset: u32, value: u32) {
+    pub unsafe fn write(&mut self, register: Register, value: u32) {
+        let offset = register as u32;
+
         // Make sure that provided offset is a APIC valid register.
         assert!(offset < 0x400 && offset % 16 == 0, "Invalid APIC register passed to `write`.");
 
@@ -95,6 +107,47 @@ impl Apic {
             }
         }
     }
+
+    pub unsafe fn eoi() {
+        // Don't lock the APIC to avoid potential deadlocks. We will only EOI anyway.
+        let apic = &mut *core!().apic.bypass();
+
+        if let Some(apic) = apic {
+            apic.write(Register::Eoi, 0);
+        }
+    }
+}
+
+/// Remap and disable the PIC. This should also drain all interrupts.
+unsafe fn disable_pic() {
+    unsafe fn write_pic(port: u16, data: u8) {
+        cpu::outb(port, data);
+        cpu::outb(0x80, 0);
+    }
+
+    // Disable the PIC by masking off all interrupts from it.
+    write_pic(0xa1, 0xff);
+    write_pic(0x21, 0xff);
+
+    // Start the PIC initialization sequence in cascade mode.
+    write_pic(0x20, 0x11);
+    write_pic(0xa0, 0x11);
+
+    // Setup IRQ offsets for master and slave PIC.
+    write_pic(0x21, 32);
+    write_pic(0xa1, 40);
+
+    // Configure PIC layout.
+    write_pic(0x21, 4);
+    write_pic(0xa1, 2);
+
+    // Set PIC 8086 mode.
+    write_pic(0x21, 0x01);
+    write_pic(0xa1, 0x01);
+
+    // Disable the PIC again by masking off all interrupts from it.
+    write_pic(0xa1, 0xff);
+    write_pic(0x21, 0xff);
 }
 
 pub unsafe fn initialize() {
@@ -129,9 +182,8 @@ pub unsafe fn initialize() {
         state |= 1 << 10;
     }
 
-    // Disable the PIC by masking off all interrupts from it.
-    cpu::outb(0xa1, 0xff);
-    cpu::outb(0x21, 0xff);
+    // Disable the PIC before enabling APIC.
+    disable_pic();
 
     // Set the new APIC state.
     cpu::wrmsr(IA32_APIC_BASE, state);
@@ -150,7 +202,7 @@ pub unsafe fn initialize() {
     };
 
     // Software enable the APIC, set spurious interrupt vector to 0xff.
-    apic.write(0xf0, 0xff | (1 << 8));
+    apic.write(Register::SpuriousInterruptVector, 0xff | (1 << 8));
 
     let apic_id = apic.apic_id();
 

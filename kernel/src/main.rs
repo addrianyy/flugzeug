@@ -63,6 +63,8 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         // All cores are now launched and we have finished boot process.
         // Allow memory manager to clean some things up.
         mm::on_finished_boot_process();
+
+        interrupts::start_receiving();
     }
 
     if core!().id == 0 {
