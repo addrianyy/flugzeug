@@ -135,7 +135,7 @@ fn run_kernel_in_vm() {
         vm.set_reg(Register::Dr7,          0x0000_0400);
         vm.set_reg(Register::Rip,          guest_entrypoint as *const () as u64);
         vm.set_reg(Register::Rsp,          rsp);
-        vm.set_reg(Register::Rflags,       (1 << 9) | 2);
+        vm.set_reg(Register::Rflags,       2);
     }
 
     vm.intercept(&[

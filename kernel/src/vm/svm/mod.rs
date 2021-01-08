@@ -540,8 +540,8 @@ impl Vm {
         control.guest_asid  = asid;
         control.tlb_control = 0;
 
-        // We don't support virtual interrupts for now.
-        control.vintr = 0;
+        // Virtualize masking of INTR so physical interrupts can be delivered when VM is running.
+        control.vintr = 1 << 24;
 
         // Enable nested paging and set nested page table CR3. Don't setup any encryption.
         control.feature_control = 1;
@@ -726,6 +726,8 @@ impl Vm {
     }
 
     pub unsafe fn run(&mut self) -> (VmExit, Option<Event>) {
+        assert!(core!().interrupts_enabled(), "Cannot run VM with interrupts disabled.");
+
         // Handle case where this VM is ran on different CPU than before (or is ran for the first
         // time).
         if core!().id != self.last_core {

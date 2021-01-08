@@ -147,20 +147,22 @@ impl CoreLocals {
         }
     }
 
-    pub unsafe fn interrupts_enabled(&self) -> bool {
+    pub fn interrupts_enabled(&self) -> bool {
         // Get the expected state of the interrupt flag.
         let enabled = !self.in_interrupt() && !self.in_exception() &&
             self.interrupts_disable.depth() == 0;
 
         let rflags: u64;
 
-        asm!(
-            r#"
-                pushfq
-                pop {}
-            "#,
-            out(reg) rflags,
-        );
+        unsafe {
+            asm!(
+                r#"
+                    pushfq
+                    pop {}
+                "#,
+                out(reg) rflags,
+            );
+        }
 
         // Make sure that our expectations match reality.
         assert!((rflags & (1 << 9) != 0) == enabled);

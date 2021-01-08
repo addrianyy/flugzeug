@@ -132,7 +132,7 @@ impl VKernel {
         self.vm.set_reg(Register::Cr3,    self.page_table.table().0);
         self.vm.set_reg(Register::Rip,    self.image.entrypoint);
         self.vm.set_reg(Register::Rsp,    self.image.rsp);
-        self.vm.set_reg(Register::Rflags, (1 << 9) | 2);
+        self.vm.set_reg(Register::Rflags, 2);
 
         self.vm.intercept_all_msrs(true, true);
         self.vm.intercept_all_ports(true);

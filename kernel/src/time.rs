@@ -11,6 +11,15 @@ static HPET:     Lock<Option<Hpet>> = Lock::new(None);
 static TSC_KHZ:  AtomicU64          = AtomicU64::new(0);
 static BOOT_TSC: AtomicU64          = AtomicU64::new(0);
 
+#[allow(unused)]
+pub fn yield_execution() {
+    assert!(core!().interrupts_enabled(), "Cannot yield without interrupts enabled.");
+
+    unsafe {
+        asm!("hlt");
+    }
+}
+
 #[inline(always)]
 pub fn get() -> u64 {
     get_tsc()
