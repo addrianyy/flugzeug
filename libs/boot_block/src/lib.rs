@@ -3,7 +3,7 @@
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 
-use lock::{Lock, KernelInterrupts};
+use lock::{Lock, Interrupts};
 use rangeset::RangeSet;
 use page_table::PageTable;
 use serial_port::SerialPort;
@@ -59,7 +59,7 @@ pub struct SupportedModes {
 
 /// Data shared between the bootloader and the kernel. Allows for concurrent access.
 #[repr(C)]
-pub struct BootBlock<I: KernelInterrupts> {
+pub struct BootBlock<I: Interrupts> {
     /// Size of the `BootBlock` used to make sure that the shape of the structure is the same
     /// in 32 bit mode and 64 bit mode.
     pub size: u64,
@@ -83,7 +83,7 @@ pub struct BootBlock<I: KernelInterrupts> {
     pub supported_modes:        Lock<Option<SupportedModes>, I>,
 }
 
-impl<I: KernelInterrupts> BootBlock<I> {
+impl<I: Interrupts> BootBlock<I> {
     /// Create an empty `BootBlock` and cache the size of it in current processor mode.
     pub const fn new() -> Self {
         Self {

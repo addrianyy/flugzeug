@@ -9,7 +9,7 @@ use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::marker::PhantomData;
 
-pub trait KernelInterrupts {
+pub trait Interrupts {
     fn in_interrupt() -> bool;
     fn in_exception() -> bool;
 
@@ -20,7 +20,7 @@ pub trait KernelInterrupts {
 }
 
 #[repr(C)]
-pub struct Lock<T: ?Sized, I: KernelInterrupts> {
+pub struct Lock<T: ?Sized, I: Interrupts> {
     locked: AtomicBool,
 
     non_preemptible:    bool,
@@ -29,7 +29,7 @@ pub struct Lock<T: ?Sized, I: KernelInterrupts> {
     value: UnsafeCell<T>,
 }
 
-impl<T, I: KernelInterrupts> Lock<T, I> {
+impl<T, I: Interrupts> Lock<T, I> {
     pub const fn new(value: T) -> Self {
         Lock {
             value:              UnsafeCell::new(value),
@@ -40,7 +40,7 @@ impl<T, I: KernelInterrupts> Lock<T, I> {
     }
 }
 
-impl<T: ?Sized, I: KernelInterrupts> Lock<T, I> {
+impl<T: ?Sized, I: Interrupts> Lock<T, I> {
     #[inline(always)]
     pub fn is_locked(&self) -> bool {
         self.locked.load(Ordering::Relaxed)
@@ -91,13 +91,13 @@ impl<T: ?Sized, I: KernelInterrupts> Lock<T, I> {
     }
 }
 
-pub struct LockGuard<'a, T: ?Sized, I: KernelInterrupts> {
+pub struct LockGuard<'a, T: ?Sized, I: Interrupts> {
     lock:        &'a Lock<T, I>,
     value:       &'a mut T,
     force_taken: bool,
 }
 
-impl<'a, T: ?Sized, I: KernelInterrupts> Drop for LockGuard<'a, T, I> {
+impl<'a, T: ?Sized, I: Interrupts> Drop for LockGuard<'a, T, I> {
     fn drop(&mut self) {
         // Unlock the lock only if it is wasn't taken by force.
         if !self.force_taken {
@@ -106,7 +106,7 @@ impl<'a, T: ?Sized, I: KernelInterrupts> Drop for LockGuard<'a, T, I> {
     }
 }
 
-impl<'a, T: ?Sized, I: KernelInterrupts> Deref for LockGuard<'a, T, I> {
+impl<'a, T: ?Sized, I: Interrupts> Deref for LockGuard<'a, T, I> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -114,11 +114,11 @@ impl<'a, T: ?Sized, I: KernelInterrupts> Deref for LockGuard<'a, T, I> {
     }
 }
 
-impl<'a, T: ?Sized, I: KernelInterrupts> DerefMut for LockGuard<'a, T, I> {
+impl<'a, T: ?Sized, I: Interrupts> DerefMut for LockGuard<'a, T, I> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.value
     }
 }
 
-unsafe impl<T: ?Sized + Send, I: KernelInterrupts> Send for Lock<T, I> {}
-unsafe impl<T: ?Sized + Send, I: KernelInterrupts> Sync for Lock<T, I> {}
+unsafe impl<T: ?Sized + Send, I: Interrupts> Send for Lock<T, I> {}
+unsafe impl<T: ?Sized + Send, I: Interrupts> Sync for Lock<T, I> {}

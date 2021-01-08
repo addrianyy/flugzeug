@@ -63,6 +63,7 @@ extern fn efi_main(image_handle: usize, system_table: *mut efi::EfiSystemTable) 
 
         INITIALIZED.store(true, Ordering::Relaxed);
     } else {
+        // If we are running for the second time (or later), increase core ID.
         CORE_ID.fetch_add(1, Ordering::Relaxed);
 
         bootlib::verify_cpu();

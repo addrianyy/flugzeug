@@ -23,6 +23,9 @@ global enter_kernel
 ; qword [rsp + 0x40] - Trampoline RSP
 ; qword [rsp + 0x48] - Boot TSC
 enter_kernel:
+    cli
+    cld
+
     ; Move all register arguments to shadow space on the stack.
     mov [rsp + 0x8],  rcx
     mov [rsp + 0x10], rdx

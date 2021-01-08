@@ -40,8 +40,8 @@ impl PhysMem for PhysicalMemory {
     }
 }
 
-pub unsafe fn alloc_phys<I: lock::KernelInterrupts>(boot_block: &BootBlock<I>,
-                                                    layout: Layout) -> Option<PhysAddr> {
+pub unsafe fn alloc_phys<I: lock::Interrupts>(boot_block: &BootBlock<I>,
+                                              layout: Layout) -> Option<PhysAddr> {
     let mut free_memory = boot_block.free_memory.lock();
     let free_memory     = free_memory.as_mut().unwrap();
 

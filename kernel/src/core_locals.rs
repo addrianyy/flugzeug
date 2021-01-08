@@ -130,7 +130,7 @@ impl CoreLocals {
 
 struct EarlyInterrupts;
 
-impl lock::KernelInterrupts for EarlyInterrupts {
+impl lock::Interrupts for EarlyInterrupts {
     fn in_exception() -> bool { false }
     fn in_interrupt() -> bool { false }
 
@@ -140,7 +140,7 @@ impl lock::KernelInterrupts for EarlyInterrupts {
         (NEXT_FREE_CORE_ID.load(Ordering::Relaxed) - 1) as u32
     }
 
-    unsafe fn enable_interrupts() {}
+    unsafe fn enable_interrupts()  {}
     unsafe fn disable_interrupts() {}
 }
 
@@ -159,7 +159,7 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
 
     let core_id         = NEXT_FREE_CORE_ID.fetch_add(1, Ordering::SeqCst);
     let core_locals_ptr = {
-        // Get boot block using early interrupts because normal `KernelInterrupts` use core!
+        // Get boot block using early interrupts because normal `KernelInterrupts` use `core!`
         // macro.
         let boot_block = mm::phys_ref::<BootBlock<EarlyInterrupts>>(boot_block).unwrap();
 

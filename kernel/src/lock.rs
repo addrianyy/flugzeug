@@ -1,6 +1,6 @@
 pub struct KernelInterrupts;
 
-impl lock::KernelInterrupts for KernelInterrupts {
+impl lock::Interrupts for KernelInterrupts {
     fn in_exception() -> bool { false }
     fn in_interrupt() -> bool { false }
 

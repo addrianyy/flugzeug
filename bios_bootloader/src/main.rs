@@ -439,6 +439,7 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
 
         INITIALIZED.store(true, Ordering::Relaxed);
     } else {
+        // If we are running for the second time (or later), increase core ID.
         CORE_ID.fetch_add(1, Ordering::Relaxed);
 
         bootlib::verify_cpu();

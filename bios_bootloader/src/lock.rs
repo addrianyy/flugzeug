@@ -2,7 +2,7 @@ use core::sync::atomic::Ordering;
 
 pub struct EmptyInterrupts;
 
-impl lock::KernelInterrupts for EmptyInterrupts {
+impl lock::Interrupts for EmptyInterrupts {
     fn in_exception() -> bool { false }
     fn in_interrupt() -> bool { false }
 

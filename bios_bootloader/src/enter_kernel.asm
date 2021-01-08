@@ -12,6 +12,9 @@ global enter_kernel
 ; qword [esp + 0x24] - Physical region base
 ; qword [esp + 0x2c] - Boot TSC
 enter_kernel:
+    cli
+    cld
+
     ; Enable some SSE stuff and PAE which is required for long mode.
     xor eax, eax
     or  eax, (1 <<  9) ; OSFXSR
