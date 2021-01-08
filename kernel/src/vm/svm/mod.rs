@@ -327,22 +327,28 @@ pub enum VmExit {
         write:    bool,
         execute:  bool,
     },
-    CrAccess {
-        n:     u8,
-        write: bool,
+    Io {
+        write:        bool,
+        port:         u16,
+        operand_size: OperandSize,
+        string:       Option<IoString>,
     },
-    DrAccess {
-        n:     u8,
-        write: bool,
-    },
+    CrRead(u8),
+    CrWrite(u8),
+    DrRead(u8),
+    DrWrite(u8),
+    ReadMsr(u32),
+    WriteMsr(u32),
     Interrupt(Interrupt),
     Exception(Exception),
-    IdtrAccess { write: bool },
-    GdtrAccess { write: bool },
-    LdtrAccess { write: bool },
-    TrAccess   { write: bool },
-    Msr        { write: bool, msr:  u32 },
-    Io         { write: bool, port: u16, operand_size: OperandSize, string: Option<IoString> },
+    IdtrRead,
+    GdtrRead,
+    LdtrRead,
+    TrRead,
+    IdtrWrite,
+    GdtrWrite,
+    LdtrWrite,
+    TrWrite,
     Rdtsc,
     Rdpmc,
     Pushf,
@@ -919,10 +925,10 @@ impl Vm {
         const INVALID_STATE: u64 = !0;
 
         let vmexit = match exit_code {
-            0x00..=0x0f => VmExit::CrAccess { n: (exit_code - 0x00) as u8, write: false },
-            0x10..=0x1f => VmExit::CrAccess { n: (exit_code - 0x10) as u8, write: true  },
-            0x20..=0x2f => VmExit::DrAccess { n: (exit_code - 0x20) as u8, write: false },
-            0x30..=0x3f => VmExit::DrAccess { n: (exit_code - 0x30) as u8, write: true  },
+            0x00..=0x0f => VmExit::CrRead( (exit_code - 0x00) as u8),
+            0x10..=0x1f => VmExit::CrWrite((exit_code - 0x10) as u8),
+            0x20..=0x2f => VmExit::DrRead( (exit_code - 0x20) as u8),
+            0x30..=0x3f => VmExit::DrWrite((exit_code - 0x30) as u8),
             0x40..=0x5f => {
                 let vector     = exit_code - 0x40;
                 let error_code = exit_info_1 as u32;
@@ -958,14 +964,14 @@ impl Vm {
             0x63        => VmExit::Interrupt(Interrupt::Init),
             0x64        => VmExit::Interrupt(Interrupt::Vintr),
             0x65        => unreachable!("cr0 selective write"),
-            0x66        => VmExit::IdtrAccess { write: false },
-            0x67        => VmExit::GdtrAccess { write: false },
-            0x68        => VmExit::LdtrAccess { write: false },
-            0x69        => VmExit::TrAccess   { write: false },
-            0x6a        => VmExit::IdtrAccess { write: true },
-            0x6b        => VmExit::GdtrAccess { write: true },
-            0x6c        => VmExit::LdtrAccess { write: true },
-            0x6d        => VmExit::TrAccess   { write: true },
+            0x66        => VmExit::IdtrRead,
+            0x67        => VmExit::GdtrRead,
+            0x68        => VmExit::LdtrRead,
+            0x69        => VmExit::TrRead,
+            0x6a        => VmExit::IdtrWrite,
+            0x6b        => VmExit::GdtrWrite,
+            0x6c        => VmExit::LdtrWrite,
+            0x6d        => VmExit::TrWrite,
             0x6e        => VmExit::Rdtsc,
             0x6f        => VmExit::Rdpmc,
             0x70        => VmExit::Pushf,
@@ -1028,9 +1034,14 @@ impl Vm {
                     string,
                 }
             }
-            0x7c        => VmExit::Msr {
-                msr:   self.reg(Register::Rcx) as u32,
-                write: exit_info_1 == 1,
+            0x7c        => {
+                let msr = self.reg(Register::Rcx) as u32;
+
+                if exit_info_1 == 1 {
+                    VmExit::WriteMsr(msr)
+                } else {
+                    VmExit::ReadMsr(msr)
+                }
             },
             0x7d        => unreachable!("task switch"),
             0x7e        => VmExit::FerrFreeze,
