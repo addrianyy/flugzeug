@@ -85,6 +85,8 @@ pub struct CoreLocals {
     in_interrupt:       DepthCounter,
     in_exception:       DepthCounter,
 
+    pub last_timer_tsc: AtomicU64,
+
     /// Biggest page type supported on the system.
     pub max_page_type: PageType,
 
@@ -319,6 +321,7 @@ pub unsafe fn initialize(boot_block: PhysAddr, boot_tsc: u64) {
         apic_id:        AtomicU32::new(!0),
         interrupts:     Lock::new(None),
         host_save_area: Lock::new(None),
+        last_timer_tsc: AtomicU64::new(0),
         boot_block,
         max_page_type,
         // We start with interrupts disabled so initial depth counter is 1.

@@ -1,15 +1,21 @@
 use page_table::PhysAddr;
-use crate::mm;
+use crate::{mm, time};
 
 const IA32_APIC_BASE: u32 = 0x1b;
 const APIC_BASE:      u64 = 0xfee0_0000;
 
+pub const APIC_TIMER_IRQ:    u8  = 0xfe;
+pub const SPURIOUS_IRQ:      u8  = 0xff;
+pub const APIC_TIMER_PERIOD: f64 = 0.05;
+
 pub enum Register {
-    ApicID                  = 0x20,
-    Eoi                     = 0xb0,
-    SpuriousInterruptVector = 0xf0,
-    TimerLvt                = 0x320,
-    TimerInitialCount       = 0x380,
+    ApicID                   = 0x20,
+    Eoi                      = 0xb0,
+    SpuriousInterruptVector  = 0xf0,
+    TimerLvt                 = 0x320,
+    TimerInitialCount        = 0x380,
+    TimerCurrentCount        = 0x390,
+    TimerDivideConfiguration = 0x3e0,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -108,6 +114,42 @@ impl Apic {
         }
     }
 
+    pub unsafe fn enable_timer(&mut self) {
+        let lvt          = APIC_TIMER_IRQ as u32;
+        let periodic_lvt = lvt | (1 << 17);
+        let masked_lvt   = lvt | (1 << 16);
+
+        // Start the APIC timer. Set divide by 16.
+        self.write(Register::TimerDivideConfiguration, 3);
+        self.write(Register::TimerLvt,                 lvt);
+        self.write(Register::TimerInitialCount,        0xffff_ffff);
+
+        let start_time = time::get();
+
+        // Wait for about `APIC_TIMER_PERIOD` seconds.
+        loop {
+            let time = time::get();
+            if  time::difference(start_time, time) >= APIC_TIMER_PERIOD {
+                break;
+            }
+        }
+
+        // Stop the APIC timer.
+        self.write(Register::TimerLvt, masked_lvt);
+
+        // Get the amount of ticks it takes to elapse `APIC_TIMER_PERIOD` seconds.
+        let ticks = 0xffff_ffff - self.read(Register::TimerCurrentCount);
+
+        if core!().id == 0 {
+            println!("APIC timer period: {}ms ({} ticks).",
+                     (APIC_TIMER_PERIOD * 1000.0) as u32, ticks);
+        }
+
+        // Configure the APIC timer to tick in `APIC_TIMER_PERIOD`.
+        self.write(Register::TimerLvt,          periodic_lvt);
+        self.write(Register::TimerInitialCount, ticks);
+    }
+
     pub unsafe fn eoi() {
         // Don't lock the APIC to avoid potential deadlocks. We will only EOI anyway.
         let apic = &mut *core!().apic.bypass();
@@ -201,8 +243,8 @@ pub unsafe fn initialize() {
         Apic::X2Apic
     };
 
-    // Software enable the APIC, set spurious interrupt vector to 0xff.
-    apic.write(Register::SpuriousInterruptVector, 0xff | (1 << 8));
+    // Software enable the APIC, set spurious interrupt vector to `SPURIOUS_IRQ` (0xff).
+    apic.write(Register::SpuriousInterruptVector, (SPURIOUS_IRQ as u32) | (1 << 8));
 
     let apic_id = apic.apic_id();
 

@@ -1,9 +1,10 @@
+use core::sync::atomic::Ordering;
 use core::alloc::{GlobalAlloc, Layout};
 use alloc::{vec, vec::Vec, boxed::Box};
 
 use cpu::TableRegister;
 
-use crate::{mm, panic};
+use crate::{mm, panic, apic, time};
 
 pub struct Interrupts {
     _idt: Box<[IdtGate]>,
@@ -259,19 +260,6 @@ fn panic_on_interrupt(vector: u8, frame: &InterruptFrame, error: u64, _regs: &Re
     }
 }
 
-fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
-                        _regs: &mut RegisterState) -> bool {
-    if vector == 123 {
-        unsafe {
-            crate::apic::Apic::eoi();
-        }
-
-        return true;
-    }
-
-    false
-}
-
 #[no_mangle]
 unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, error: u64,
                                       regs: &mut RegisterState) {
@@ -304,6 +292,41 @@ unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, er
     panic_on_interrupt(vector, frame, error, regs);
 }
 
+fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
+                        _regs: &mut RegisterState) -> bool {
+    match vector {
+        apic::APIC_TIMER_IRQ => {
+            unsafe {
+                apic::Apic::eoi();
+            }
+
+            let tsc      = time::get();
+            let last_tsc = core!().last_timer_tsc.load(Ordering::Relaxed);
+
+            // This is first timer tick on this core if last TSC == 0.
+            if last_tsc > 0 {
+                // Get the time from last tick to this tick.
+                let difference = time::difference(last_tsc, tsc);
+
+                // If the difference is too high that means that someone had interrupts disabled
+                // for too long.
+                if difference > apic::APIC_TIMER_PERIOD * 3.0 + 0.1 {
+                    panic!("Interrupts were disabled for too long ({:.02}s).", difference);
+                }
+            }
+
+            core!().last_timer_tsc.store(tsc, Ordering::Relaxed);
+
+            true
+        }
+        apic::SPURIOUS_IRQ => {
+            // We don't need to do anything to handle spurious IRQ.
+            true
+        }
+        _ => false,
+    }
+}
+
 pub unsafe fn start_receiving() {
     // We are now ready to receive interrupts.
     core!().enable_interrupts();
@@ -311,11 +334,8 @@ pub unsafe fn start_receiving() {
     // Make sure that we have actually enabled interrupts.
     assert!(core!().interrupts_enabled(), "Failed to enable interrupts on the core.");
 
+    // Enable the APIC timer.
     if let Some(apic) = core!().apic.lock().as_mut() {
-        let timer_lvt = 123 | (1 << 17);
-
-        use crate::apic::Register;
-        apic.write(Register::TimerInitialCount, 100_000);
-        apic.write(Register::TimerLvt,          timer_lvt);
+        apic.enable_timer();
     }
 }

@@ -12,13 +12,11 @@ static TSC_KHZ:  AtomicU64          = AtomicU64::new(0);
 static BOOT_TSC: AtomicU64          = AtomicU64::new(0);
 
 #[inline(always)]
-#[allow(unused)]
 pub fn get() -> u64 {
     get_tsc()
 }
 
-#[allow(unused)]
-pub fn time_difference(from: u64, to: u64) -> f64 {
+pub fn difference(from: u64, to: u64) -> f64 {
     assert!(to > from, "`to` ({}) is earlier than `from` ({}).", to, from);
 
     let khz   = TSC_KHZ.load(Ordering::Relaxed);
@@ -27,19 +25,16 @@ pub fn time_difference(from: u64, to: u64) -> f64 {
     delta as f64 / khz as f64 / 1_000.0
 }
 
-#[allow(unused)]
 pub fn local_uptime() -> f64 {
-    time_difference(core!().boot_tsc, get_tsc())
+    difference(core!().boot_tsc, get_tsc())
 }
 
-#[allow(unused)]
 pub fn global_uptime() -> f64 {
-    time_difference(BOOT_TSC.load(Ordering::Relaxed), get_tsc())
+    difference(BOOT_TSC.load(Ordering::Relaxed), get_tsc())
 }
 
-#[allow(unused)]
 pub fn uptime_with_firmware() -> f64 {
-    time_difference(0, get_tsc())
+    difference(0, get_tsc())
 }
 
 #[inline(always)]
