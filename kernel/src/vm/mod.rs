@@ -122,6 +122,7 @@ fn run_kernel_in_vm() {
         vm.set_reg(Register::Cr2,          0);
         vm.set_reg(Register::Cr3,          cpu::get_cr3() as u64);
         vm.set_reg(Register::Cr4,          cpu::get_cr4() as u64);
+        vm.set_reg(Register::Xcr0,         cpu::get_xcr0());
         vm.set_reg(Register::Star,         cpu::rdmsr(0xc000_0081));
         vm.set_reg(Register::Lstar,        cpu::rdmsr(0xc000_0082));
         vm.set_reg(Register::Cstar,        cpu::rdmsr(0xc000_0083));
@@ -143,7 +144,7 @@ fn run_kernel_in_vm() {
         Intercept::Vmmcall,
 
         // Intercept other instructions.
-        Intercept::Xsetbv, Intercept::Hlt, Intercept::Invlpgb,
+        Intercept::Hlt, Intercept::Invlpgb,
 
         // Intercept other stuff.
         Intercept::FerrFreeze,
@@ -200,6 +201,7 @@ fn run_kernel_in_vm() {
         }
     }
 
+
     println!("Done! Mapped in {} pages. Interrupted {} times.", mapped_pages, interrupts);
 }
 
@@ -211,6 +213,8 @@ fn run_vkernel_in_vm() {
     let exit        = vkernel.run();
 
     println!("VKernel exited: {:x?}.", exit);
+
+    assert!(vkernel.vm.reg(Register::Xcr0) == 3);
 }
 
 pub unsafe fn initialize() {

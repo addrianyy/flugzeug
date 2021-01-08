@@ -92,6 +92,7 @@ pub enum Register {
     R15    = 15,
     Rip    = 16,
     Rflags = 17,
+    Xcr0   = 18,
 
     Efer,
     Cr0,
@@ -412,7 +413,7 @@ pub struct Vm {
     host_xsave: XsaveArea,
 
     /// Basic register state for the guest. Contains all GPRs, RIP and RFLAGS.
-    guest_registers: [u64; 18],
+    guest_registers: [u64; 19],
 
     /// Nested page tables for the guest.
     npt: Npt,
@@ -454,7 +455,7 @@ impl Vm {
             host_vmcb:  Vmcb::new(),
             host_xsave: XsaveArea::new(),
 
-            guest_registers: [0; 18],
+            guest_registers: [0; 19],
             npt:             Npt::new(),
 
             asid,
@@ -768,6 +769,11 @@ impl Vm {
         self.vmcb_mut().state.rip    = self.reg(Register::Rip);
         self.vmcb_mut().state.rflags = self.reg(Register::Rflags);
 
+        let host_xcr0 = cpu::get_xcr0();
+
+        // Validate XCR0 to avoid memory corruption.
+        self.validate_xcr0(host_xcr0);
+
         asm!(
             r#"
                 // Disable all interrupts on the system before context switching.
@@ -778,13 +784,32 @@ impl Vm {
                 // Save RBP as it cannot be in the inline assembly clobber list.
                 push rbp
 
-                // Prepare XSAVE mask to affect X87, SSE and AVX state.
-                xor edx, edx
-                mov eax, (1 << 0) | (1 << 1) | (1 << 2)
 
-                // Save host FPU state and load guest FPU state.
-                xsave64  [r13]
+                // Get host XCR0.
+                xor ecx, ecx
+                xor eax, eax
+                xor edx, edx
+                xgetbv
+
+                // Save host XCR0 on the stack.
+                push rax
+                push rdx
+
+                // Save host FPU state.
+                xsave64 [r13]
+
+
+                // Get guest XCR0.
+                mov eax, dword ptr [r14 + 18 * 8 + 0]
+                mov edx, dword ptr [r14 + 18 * 8 + 4]
+
+                // Set guest XCR0. It is already validated.
+                xor ecx, ecx
+                xsetbv
+
+                // Load guest FPU state.
                 xrstor64 [r12]
+
 
                 // Save host partial processor state.
                 mov    rax, r11
@@ -864,13 +889,40 @@ impl Vm {
                 mov    rax, r11
                 vmload rax
 
-                // Prepare XSAVE mask to affect X87, SSE and AVX state.
-                xor edx, edx
-                mov eax, (1 << 0) | (1 << 1) | (1 << 2)
 
-                // Save guest FPU state and load host FPU state.
-                xsave64  [r12]
+                // Pop host XCR0 from the stack.
+                pop rdi // RDX
+                pop rsi // RAX
+
+
+                // Get guest XCR0.
+                xor eax, eax
+                xor edx, edx
+                xor ecx, ecx
+                xgetbv
+
+                // Save guest XCR0 to the cache.
+                mov dword ptr [r14 + 18 * 8 + 0], eax
+                mov dword ptr [r14 + 18 * 8 + 4], edx
+
+                // Mask guest XCR0 to not corrupt memory. There cannot be a bit that is enabled
+                // in guest XCR0 but disabled in the host XCR0.
+                and eax, esi
+                and edx, edi
+
+                // Save guest FPU state.
+                xsave64 [r12]
+
+
+                // Restore host XCR0.
+                mov eax, esi
+                mov edx, edi
+                xor ecx, ecx
+                xsetbv
+
+                // Load host FPU state.
                 xrstor64 [r13]
+
 
                 // Restore RBP pushed at the beginning.
                 pop rbp
@@ -900,6 +952,11 @@ impl Vm {
             inout("r13") self.host_xsave.pointer()         => _,
             inout("r14") self.guest_registers.as_mut_ptr() => _,
         );
+
+        assert_eq!(cpu::get_xcr0(), host_xcr0, "Restored XCR0 is invalid.");
+
+        // Validate XCR0 to avoid memory corruption.
+        self.validate_xcr0(host_xcr0);
 
         // Copy relevant registers from the VMCB to the cache.
         self.set_reg(Register::Rax,    self.vmcb().state.rax);
@@ -1034,7 +1091,7 @@ impl Vm {
                     string,
                 }
             }
-            0x7c        => {
+            0x7c => {
                 let msr = self.reg(Register::Rcx) as u32;
 
                 if exit_info_1 == 1 {
@@ -1344,6 +1401,14 @@ impl Vm {
         }
 
         self.vmcb_mut().control.event_injection = injection;
+    }
+
+    fn validate_xcr0(&self, host_xcr0: u64) {
+        let xcr0 = self.reg(Register::Xcr0);
+
+        assert!(xcr0 & 1 == 1, "Guest XCR0 doesn't have X87 bit set.");
+        assert!(xcr0 & !host_xcr0 == 0, "Guest XCR0 has enabled bits which are \
+                disabled in host.");
     }
 
     fn vmcb(&self) -> &Vmcb {

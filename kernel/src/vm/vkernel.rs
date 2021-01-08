@@ -56,7 +56,7 @@ struct VKernelImage {
 }
 
 pub struct VKernel {
-    vm:         Vm,
+    pub vm:     Vm,
     address:    u64,
     page_table: PageTable,
     image:      VKernelImage,
@@ -129,6 +129,7 @@ impl VKernel {
         // Everything WB.
         self.vm.set_reg(Register::Pat, 0x0606_0606_0606_0606);
 
+        self.vm.set_reg(Register::Xcr0,   1);
         self.vm.set_reg(Register::Cr3,    self.page_table.table().0);
         self.vm.set_reg(Register::Rip,    self.image.entrypoint);
         self.vm.set_reg(Register::Rsp,    self.image.rsp);
@@ -145,7 +146,7 @@ impl VKernel {
             Intercept::Vmmcall,
 
             // Intercept other instructions.
-            Intercept::Xsetbv, Intercept::Hlt, Intercept::Invlpgb,
+            Intercept::Hlt, Intercept::Invlpgb,
 
             // Intercept reads and writed of relevant CRs.
             Intercept::Cr0Read, Intercept::Cr0Write,

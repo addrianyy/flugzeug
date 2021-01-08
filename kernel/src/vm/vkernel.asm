@@ -12,4 +12,10 @@ entry:
     pop  rbx
     mov  dword [rbx], 0x1337
 
+    xor rcx, rcx
+    xor rax, rax
+    xor rdx, rdx
+    mov rax, 3
+    xsetbv
+
     hlt
