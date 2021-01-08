@@ -127,11 +127,11 @@ impl CoreLocals {
     pub fn in_exception(&self) -> bool { self.in_exception.depth() > 0 }
 
     pub unsafe fn disable_interrupts(&self) {
-        // Increase interrupt disable counter.
-        self.interrupts_disable.enter();
-
         // Unconditionally disable interrupts.
         cpu::disable_interrupts();
+
+        // Increase interrupt disable counter.
+        self.interrupts_disable.enter();
     }
 
     pub unsafe fn enable_interrupts(&self) {
@@ -147,6 +147,7 @@ impl CoreLocals {
         }
     }
 
+    #[track_caller]
     pub fn interrupts_enabled(&self) -> bool {
         // Get the expected state of the interrupt flag.
         let enabled = !self.in_interrupt() && !self.in_exception() &&

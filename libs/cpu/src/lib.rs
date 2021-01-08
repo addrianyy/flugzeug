@@ -341,6 +341,11 @@ pub unsafe fn set_cr3(cr3: usize) {
     asm!("mov cr3, {}", in(reg) cr3);
 }
 
+#[cfg(target_pointer_width = "64")]
+pub unsafe fn set_cr8(cr8: u64) {
+    asm!("mov cr8, {}", in(reg) cr8);
+}
+
 macro_rules! segment_accesssor {
     ($function_name: ident, $assembly: expr) => {
         pub fn $function_name() -> u16 {

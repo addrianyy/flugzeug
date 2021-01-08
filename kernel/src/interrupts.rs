@@ -6,6 +6,8 @@ use cpu::TableRegister;
 
 use crate::{mm, panic, apic, time};
 
+pub const PRINT_IN_INTERRUPTS: bool = false;
+
 pub struct Interrupts {
     _idt: Box<[IdtGate]>,
     _gdt: Box<[u64]>,
@@ -313,6 +315,11 @@ fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
                 if difference > apic::APIC_TIMER_PERIOD * 3.0 + 0.1 {
                     panic!("Interrupts were disabled for too long ({:.02}s).", difference);
                 }
+
+                if PRINT_IN_INTERRUPTS {
+                    println!("Timer tick on CPU {}. Elapsed time: {:.2}ms.", core!().id,
+                             difference * 1000.0);
+                }
             }
 
             core!().last_timer_tsc.store(tsc, Ordering::Relaxed);
@@ -327,12 +334,19 @@ fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
     }
 }
 
-pub unsafe fn start_receiving() {
+pub unsafe fn initial_enable() {
+    assert!(core!().last_timer_tsc.load(Ordering::Relaxed) == 0,
+            "Already initially enabled interrupts.");
+
     // We are now ready to receive interrupts.
     core!().enable_interrupts();
 
     // Make sure that we have actually enabled interrupts.
-    assert!(core!().interrupts_enabled(), "Failed to enable interrupts on the core.");
+    assert!(core!().interrupts_enabled(), "Failed to enable interrupts on core {}.",
+            core!().id);
+
+    // Make sure that we won't mask any interrupts.
+    cpu::set_cr8(0);
 
     // Enable the APIC timer.
     if let Some(apic) = core!().apic.lock().as_mut() {

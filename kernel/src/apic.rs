@@ -78,7 +78,6 @@ impl Apic {
         }
     }
 
-    #[allow(dead_code)]
     pub unsafe fn read(&self, register: Register) -> u32 {
         let offset = register as u32;
 
@@ -96,7 +95,6 @@ impl Apic {
         }
     }
 
-    #[allow(dead_code)]
     pub unsafe fn write(&mut self, register: Register, value: u32) {
         let offset = register as u32;
 

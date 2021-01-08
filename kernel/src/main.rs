@@ -64,7 +64,7 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         // Allow memory manager to clean some things up.
         mm::on_finished_boot_process();
 
-        interrupts::start_receiving();
+        interrupts::initial_enable();
     }
 
     if core!().id == 0 {

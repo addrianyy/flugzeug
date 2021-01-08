@@ -8,7 +8,10 @@ use svm::npt::{self, GuestAddr, PageType};
 use vkernel::VKernel;
 
 unsafe fn guest_entrypoint() -> ! {
-    println!("Running in the VM! Uptime: {:.2}s.", crate::time::global_uptime());
+    // If printing in interrupts is enabled we will mess up guest and host interrupt state.
+    if !crate::interrupts::PRINT_IN_INTERRUPTS {
+        println!("Running in the VM! Uptime: {:.2}s.", crate::time::global_uptime());
+    }
 
     asm!(r#"
         mov eax, 0x1337

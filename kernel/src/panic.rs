@@ -37,13 +37,15 @@ unsafe fn force_acquire_lock<T>(lock: &Lock<T>) -> LockGuard<'_, T> {
     let end_tsc = time::get_tsc() + wait_cycles;
 
     while time::get_tsc() < end_tsc {
-        if let Some(locked) = lock.try_lock() {
+        // Try to unsafely lock. This function won't panic on deadlock. It also
+        // won't disable interrupts if needed (that's fine, they are already disabled).
+        if let Some(locked) = lock.try_lock_unsafe() {
             return locked;
         }
     }
 
     // This lock is most likely held by this core. Take the lock in unsafe manner.
-    lock.force_take()
+    lock.force_lock_unsafe()
 }
 
 enum SerialPortWrapper {

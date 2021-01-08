@@ -2,13 +2,20 @@ use alloc::{vec, boxed::Box};
 
 use crate::{mm, font};
 use crate::lock::Lock;
+use crate::interrupts::PRINT_IN_INTERRUPTS;
 
 use boot_block::{FramebufferInfo, PixelFormat};
 use page_table::PhysAddr;
 
 pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xffffff;
 
-static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = Lock::new(None);
+static FRAMEBUFFER: Lock<Option<TextFramebuffer>> = {
+    if PRINT_IN_INTERRUPTS {
+        Lock::new_non_preemptible(None)
+    } else {
+        Lock::new(None)
+    }
+};
 
 enum ColorMode {
     RGB,
