@@ -2,7 +2,6 @@ use page_table::PhysAddr;
 use crate::{mm, time};
 
 const IA32_APIC_BASE: u32 = 0x1b;
-const APIC_BASE:      u64 = 0xfee0_0000;
 
 pub const APIC_TIMER_IRQ:    u8  = 0xfe;
 pub const SPURIOUS_IRQ:      u8  = 0xff;
@@ -194,13 +193,6 @@ unsafe fn disable_pic() {
 }
 
 pub unsafe fn initialize() {
-    #[allow(clippy::assertions_on_constants)]
-    {
-        // Make sure the APIC base address is valid.
-        assert!(APIC_BASE > 0 && APIC_BASE == (APIC_BASE & 0xf_ffff_f000),
-                "APIC base address is invalid.");
-    }
-
     // Make sure that the APIC hasn't been initialized yet.
     assert!(core!().apic.lock().is_none(), "APIC was already initialized.");
 
@@ -209,19 +201,15 @@ pub unsafe fn initialize() {
     // Make sure that the APIC is actually supported by the CPU.
     assert!(features.apic, "APIC is not supported by this CPU.");
 
-    let x2apic = features.x2apic;
-
     // Get the current APIC state.
-    let state = cpu::rdmsr(IA32_APIC_BASE);
+    let mut state = cpu::rdmsr(IA32_APIC_BASE);
+    let base      = state & 0xf_ffff_f000;
 
     // We can't reenable APIC if it was disabled by the BIOS.
     assert!(state & (1 << 11) != 0, "APIC was disabled by the BIOS.");
 
-    // Set the new APIC base.
-    let mut state = (state & !0xf_ffff_f000) | APIC_BASE;
-
     // If the CPU supports x2APIC mode then enable it.
-    if x2apic {
+    if features.x2apic {
         state |= 1 << 10;
     }
 
@@ -231,8 +219,8 @@ pub unsafe fn initialize() {
     // Set the new APIC state.
     cpu::wrmsr(IA32_APIC_BASE, state);
 
-    let mut apic = if !x2apic {
-        let virt_addr = mm::map_mmio(PhysAddr(APIC_BASE), 4096, mm::PAGE_UNCACHEABLE);
+    let mut apic = if !features.x2apic {
+        let virt_addr = mm::map_mmio(PhysAddr(base), 4096, mm::PAGE_UNCACHEABLE);
 
         #[allow(clippy::size_of_in_element_count)]
         {
@@ -247,10 +235,8 @@ pub unsafe fn initialize() {
     // Software enable the APIC, set spurious interrupt vector to `SPURIOUS_IRQ` (0xff).
     apic.write(Register::SpuriousInterruptVector, (SPURIOUS_IRQ as u32) | (1 << 8));
 
-    let apic_id = apic.apic_id();
-
     // Cache the APIC ID for this core.
-    core!().set_apic_id(apic_id);
+    core!().set_apic_id(apic.apic_id());
 
     *core!().apic.lock() = Some(apic);
 }
