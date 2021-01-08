@@ -170,6 +170,8 @@ unsafe fn disable_pic() {
     write_pic(0xa1, 0xff);
     write_pic(0x21, 0xff);
 
+    // Remap the PIC. Even though we disable it, it can still send us spurious interrupts.
+
     // Start the PIC initialization sequence in cascade mode.
     write_pic(0x20, 0x11);
     write_pic(0xa0, 0x11);

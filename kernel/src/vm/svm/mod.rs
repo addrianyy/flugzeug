@@ -217,10 +217,9 @@ pub enum Intercept {
     Rdpru   = MISC_2 | 14,
     // Skipped EFER and CR0-15. Both happen after guest instruction finishes. Always off.
 
-    Invlpgb        = MISC_3 | 0,
-    IllegalInvlpgb = MISC_3 | 1,
-    Pcid           = MISC_3 | 2,
-    Mcommit        = MISC_3 | 3,
+    // Skipped INVLPGB (legal and illegal) - always off. Disabled in VMCS so will cause #UD.
+    Pcid    = MISC_3 | 2,
+    Mcommit = MISC_3 | 3,
     // Skipped TLBSYNC - not always supported. Always off.
 
     Cr0Read  = CR_RW | (0  + 0),
@@ -379,8 +378,6 @@ pub enum VmExit {
     Mwait,
     Rdpru,
     Xsetbv,
-    Invlpgp,
-    IllegalInvlpgp,
     Invpcid,
     Mcommit,
 }
@@ -1120,8 +1117,8 @@ impl Vm {
             0x8d        => VmExit::Xsetbv,
             0x8f        => unreachable!("EFER trap"),
             0x90..=0x9f => unreachable!("CR trap"),
-            0xa0        => VmExit::Invlpgp,
-            0xa1        => VmExit::IllegalInvlpgp,
+            0xa0        => unreachable!("invlpgp"),
+            0xa1        => unreachable!("illegal inblpgp"),
             0xa2        => VmExit::Invpcid,
             0xa3        => VmExit::Mcommit,
             0xa4        => unreachable!("TLB sync"),

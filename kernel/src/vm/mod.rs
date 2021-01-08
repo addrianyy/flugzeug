@@ -147,7 +147,7 @@ fn run_kernel_in_vm() {
         Intercept::Vmmcall,
 
         // Intercept other instructions.
-        Intercept::Hlt, Intercept::Invlpgb,
+        Intercept::Hlt,
 
         // Intercept other stuff.
         Intercept::FerrFreeze,
@@ -189,7 +189,6 @@ fn run_kernel_in_vm() {
             }
             _ => unhandled = true,
         }
-
 
         if unhandled {
             panic!("Unhandled VM exit {:x?}.", exit)

@@ -146,7 +146,7 @@ impl VKernel {
             Intercept::Vmmcall,
 
             // Intercept other instructions.
-            Intercept::Hlt, Intercept::Invlpgb,
+            Intercept::Hlt,
 
             // Intercept reads and writed of relevant CRs.
             Intercept::Cr0Read, Intercept::Cr0Write,
