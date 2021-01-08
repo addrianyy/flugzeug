@@ -6,7 +6,8 @@ const APIC_BASE:      u64 = 0xfee0_0000;
 
 pub const APIC_TIMER_IRQ:    u8  = 0xfe;
 pub const SPURIOUS_IRQ:      u8  = 0xff;
-pub const APIC_TIMER_PERIOD: f64 = 0.05;
+pub const PIC_BASE_IRQ:      u8  = 32;
+pub const APIC_TIMER_PERIOD: f64 = 0.1;
 
 pub enum Register {
     ApicID                   = 0x20,
@@ -174,8 +175,8 @@ unsafe fn disable_pic() {
     write_pic(0xa0, 0x11);
 
     // Setup IRQ offsets for master and slave PIC.
-    write_pic(0x21, 32);
-    write_pic(0xa1, 40);
+    write_pic(0x21, PIC_BASE_IRQ);
+    write_pic(0xa1, PIC_BASE_IRQ + 8);
 
     // Configure PIC layout.
     write_pic(0x21, 4);

@@ -83,5 +83,5 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         }
     }
 
-    cpu::halt();
+    time::idle();
 }

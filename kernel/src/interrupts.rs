@@ -6,7 +6,7 @@ use cpu::TableRegister;
 
 use crate::{mm, panic, apic, time};
 
-pub const PRINT_IN_INTERRUPTS: bool = false;
+pub const PRINT_IN_INTERRUPTS: bool = true;
 
 pub struct Interrupts {
     _idt: Box<[IdtGate]>,
@@ -296,6 +296,16 @@ unsafe extern "C" fn handle_interrupt(vector: u8, frame: &mut InterruptFrame, er
 
 fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
                         _regs: &mut RegisterState) -> bool {
+    // Ignore PIC interrupts.
+    if vector >= apic::PIC_BASE_IRQ && vector < apic::PIC_BASE_IRQ + 16 {
+        if PRINT_IN_INTERRUPTS {
+            println!("CPU {}: Ignoring PIC interrupt {}.", core!().id,
+                     vector - apic::PIC_BASE_IRQ);
+        }
+
+        return true;
+    }
+
     match vector {
         apic::APIC_TIMER_IRQ => {
             unsafe {
@@ -316,9 +326,11 @@ fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
                     panic!("Interrupts were disabled for too long ({:.02}s).", difference);
                 }
 
-                if PRINT_IN_INTERRUPTS {
-                    println!("Timer tick on CPU {}. Elapsed time: {:.2}ms.", core!().id,
-                             difference * 1000.0);
+                if false {
+                    if PRINT_IN_INTERRUPTS {
+                        println!("Timer tick on CPU {}. Elapsed time: {:.2}ms.", core!().id,
+                                 difference * 1000.0);
+                    }
                 }
             }
 
