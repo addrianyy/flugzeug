@@ -140,17 +140,10 @@ fn run_kernel_in_vm() {
 
     vm.intercept(&[
         // Intercept relevant SVM instructions.
-        Intercept::Vmmcall, Intercept::Vmload, Intercept::Vmsave, Intercept::Stgi,
-        Intercept::Clgi, Intercept::Skinit, Intercept::Invlpga,
+        Intercept::Vmmcall,
 
         // Intercept other instructions.
         Intercept::Xsetbv, Intercept::Hlt, Intercept::Invlpgb,
-
-        // Intercept all interrupts on the system.
-        Intercept::Intr,
-        Intercept::Nmi,
-        Intercept::Smi,
-        Intercept::Init,
 
         // Intercept other stuff.
         Intercept::FerrFreeze,

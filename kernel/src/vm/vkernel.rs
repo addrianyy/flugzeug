@@ -142,8 +142,7 @@ impl VKernel {
             Intercept::Pf,
 
             // Intercept relevant SVM instructions.
-            Intercept::Vmmcall, Intercept::Vmload, Intercept::Vmsave, Intercept::Stgi,
-            Intercept::Clgi, Intercept::Skinit, Intercept::Invlpga,
+            Intercept::Vmmcall,
 
             // Intercept other instructions.
             Intercept::Xsetbv, Intercept::Hlt, Intercept::Invlpgb,
@@ -152,12 +151,6 @@ impl VKernel {
             Intercept::Cr0Read, Intercept::Cr0Write,
             Intercept::Cr3Read, Intercept::Cr3Write,
             Intercept::Cr4Read, Intercept::Cr4Write,
-
-            // Intercept all interrupts on the system.
-            Intercept::Intr,
-            Intercept::Nmi,
-            Intercept::Smi,
-            Intercept::Init,
 
             // Intercept other stuff.
             Intercept::FerrFreeze,

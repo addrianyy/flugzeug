@@ -11,4 +11,5 @@ entry:
     push rax
     pop  rbx
     mov  dword [rbx], 0x1337
+
     hlt

@@ -174,10 +174,7 @@ const EXC:    usize = 6 << 8;
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Intercept {
-    Intr      = MISC_1 | 0,
-    Nmi       = MISC_1 | 1,
-    Smi       = MISC_1 | 2,
-    Init      = MISC_1 | 3,
+    // Skipped INTR, NMI, SMI, INIT - always on.
     Vintr     = MISC_1 | 4,
     // Skipped "Intercept CR0 writes that change bits other than CR0.TS or CR0.MP." - always off.
     IdtrRead  = MISC_1 | 6,
@@ -200,7 +197,7 @@ pub enum Intercept {
     Pause     = MISC_1 | 23,
     Hlt       = MISC_1 | 24,
     Invlpg    = MISC_1 | 25,
-    Invlpga   = MISC_1 | 26,
+    // Skipped INVLPGA - always on.
     // Skipped IOIO_PROT and MSR_PROT - exposed by the different API.
     // Skipped task switches - always off.
     FerrFreeze = MISC_1 | 30,
@@ -208,11 +205,7 @@ pub enum Intercept {
 
     // Skipped VMRUN - always on.
     Vmmcall = MISC_2 | 1,
-    Vmload  = MISC_2 | 2,
-    Vmsave  = MISC_2 | 3,
-    Stgi    = MISC_2 | 4,
-    Clgi    = MISC_2 | 5,
-    Skinit  = MISC_2 | 6,
+    // Skipped  VMLOAD, VMSAVE, STGI, CLGI, SKINIT - always on.
     Rdtscp  = MISC_2 | 7,
     Icebp   = MISC_2 | 8,
     Wbindvd = MISC_2 | 9,
@@ -520,10 +513,27 @@ impl Vm {
 
         let control = &mut self.vmcb_mut().control;
 
-        // Always intercept VMRUN and shutdown events. Use IOPM and MSRPM.
-        // Other intercepts will be configured by the user.
-        control.intercept_misc_2 = 1;
-        control.intercept_misc_1 = (1 << 27) | (1 << 28) | (1 << 31);
+        // Intercept by default:
+        //  INTR
+        //  NMI
+        //  SMI
+        //  INIT
+        //  INVLPGA
+        //  IOIO
+        //  MSR
+        //  Shutdown
+        control.intercept_misc_1 = (1 <<  0) | (1 <<  1) | (1 << 2) | (1 << 3) | (1 << 26) |
+                                   (1 << 27) | (1 << 28) | (1 << 31);
+
+        // Intercept by default:
+        //  VMRUN
+        //  VMLOAD
+        //  VMSAVE
+        //  STGI
+        //  CLGI
+        //  SKINIT
+        control.intercept_misc_2 = (1 << 0) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) |
+                                   (1 << 6);
 
         // Pause filters aren't used.
         control.pause_filter_threshold = 0;
@@ -726,6 +736,8 @@ impl Vm {
     }
 
     pub unsafe fn run(&mut self) -> (VmExit, Option<Event>) {
+        // We need interrupts to run the VM. Because we use virtual interrupt masking,
+        // the interrupts will be delivered and will cause VM exit even if guest RFLAGS.IF == 0.
         assert!(core!().interrupts_enabled(), "Cannot run VM with interrupts disabled.");
 
         // Handle case where this VM is ran on different CPU than before (or is ran for the first
@@ -857,8 +869,8 @@ impl Vm {
                 // Restore RBP pushed at the beginning.
                 pop rbp
 
-                // Reenable all interrupts on the system. If we exited for example due to NMI,
-                // this will cause us to deliver that NMI to the kernel as it is pending now.
+                // Reenable all interrupts on the system. If we exited due to interrupt,
+                // this will cause us to deliver it to the kernel as it is pending now.
                 stgi
             "#,
             // All registers except RSP will be clobbered. R8-R14 are also used as inputs
