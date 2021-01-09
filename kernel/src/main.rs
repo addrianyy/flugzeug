@@ -66,7 +66,7 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
     }
 
     if core!().id == 0 {
-        color_println!(0xff00ff, "Flugzeug OS loaded in {:.2}ms! {} CPUs, using {:?}.",
+        color_println!(0xff00ff, "Flugzeug OS loaded in {:.2}ms! {} CPUs, {:?}.",
                        time::uptime() * 1000.0, processors::total_cores(), core!().apic_mode());
 
         let mut buffer = [0u8; 256];

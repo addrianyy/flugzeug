@@ -520,12 +520,11 @@ pub unsafe fn initialize() {
 
         drop(kernel_framebuffer);
 
-        println!("Initialized framebuffer device with {}x{} resolution. (video buffer 0x{:x})",
+        println!("Initialized framebuffer device with {}x{} resolution (video buffer 0x{:x}). \
+                 Supported modes:",
                  framebuffer_info.width, framebuffer_info.height, framebuffer_info.fb_base);
 
         if let Some(supported_modes) = core!().boot_block.supported_modes.lock().as_ref() {
-            println!("Supported modes:");
-
             let count = supported_modes.count as usize;
 
             for (index, (width, height)) in supported_modes.modes[..count].iter().enumerate() {

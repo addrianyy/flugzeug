@@ -1,2 +1,0 @@
-pub unsafe fn initialize() {
-}

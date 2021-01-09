@@ -299,8 +299,13 @@ fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
     // Ignore PIC interrupts.
     if vector >= apic::PIC_BASE_IRQ && vector < apic::PIC_BASE_IRQ + 16 {
         if PRINT_IN_INTERRUPTS {
-            println!("CPU {}: Ignoring PIC interrupt {}.", core!().id,
-                     vector - apic::PIC_BASE_IRQ);
+            let irq = vector - apic::PIC_BASE_IRQ;
+
+            // Don't even print anything for PIC spurious interrupts.
+            if irq != 7 {
+                println!("CPU {}: Ignoring PIC interrupt {}.", core!().id,
+                         vector - apic::PIC_BASE_IRQ);
+            }
         }
 
         return true;
