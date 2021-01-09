@@ -51,12 +51,30 @@ struct KernelEntryData {
     trampoline_cr3: u32,
 }
 
+fn extended_reads_supported() -> bool {
+    let ax: u16 = 0x4100;
+    let bx: u16 = 0x55aa;
+    let dx: u16 = 0x0080;
+
+    let mut regs = RegisterState {
+        eax: ax as u32,
+        ebx: bx as u32,
+        edx: dx as u32,
+        ..Default::default()
+    };
+
+    unsafe { bios::interrupt(0x13, &mut regs); }
+
+    // The carry flag will be set if extensions are not supported.
+    regs.eflags & (1 << 0) == 0
+}
+
 fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
     // Make a temporary buffer which is on the stack in low memory address.
     let mut temp_buffer = [0u8; 512];
 
     // Make sure that the temporary buffer is accessible for BIOS.
-    assert!((temp_buffer.as_ptr() as usize).checked_add(temp_buffer.len()).unwrap() < 0x10000,
+    assert!((temp_buffer.as_ptr() as usize).checked_add(512).unwrap() < 0x10000,
             "Temporary buffer for reading sectors is inaccesible for BIOS.");
 
     for tries in 0..5 {
@@ -104,6 +122,87 @@ fn read_sector(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
         if regs.eax & 0xff == 1 && regs.eflags & 1 == 0 {
             // We have successfuly read 1 sector from disk. Now copy it to the actual destination.
             buffer.copy_from_slice(&temp_buffer);
+
+            return;
+        }
+
+        println!("Retrying disk read...");
+    }
+
+    panic!("Failed to read sector from disk at LBA {}.", lba);
+}
+
+fn read_sector_extended(boot_disk_data: &BootDiskData, lba: u32, buffer: &mut [u8]) {
+    #[repr(C)]
+    struct DiskAddressPacket {
+        size:    u8,
+        zero:    u8,
+        sectors: u16,
+        offset:  u16,
+        segment: u16,
+        lo_lba:  u32,
+        hi_lba:  u32,
+    }
+
+    #[repr(C, align(16))]
+    struct ReadBuffer([u8; 512]);
+
+    // Make sure that disk address packet has expected layout.
+    assert!(core::mem::size_of::<DiskAddressPacket>() == 16 &&
+            core::mem::align_of::<DiskAddressPacket>() >= 4,
+            "Invalid shape of disk address packet.");
+
+    // Make a temporary buffer which is aligned and on the stack in low memory address.
+    let mut temp_buffer = ReadBuffer([0u8; 512]);
+    let buffer_ptr      = temp_buffer.0.as_mut_ptr() as usize;
+
+    // Make sure that the temporary buffer is accessible for BIOS.
+    assert!(buffer_ptr.checked_add(512).unwrap() < 0x10000 && buffer_ptr % 16 == 0,
+            "Temporary buffer for reading sectors is inaccesible for BIOS.");
+
+    let mut dap = DiskAddressPacket {
+        size:    16,
+        zero:    0,
+        sectors: 1,
+        offset:  buffer_ptr as u16,
+        segment: 0,
+        lo_lba:  lba,
+        hi_lba:  0,
+    };
+
+    let dap_ptr = &mut dap as *mut _ as usize;
+
+    // Make sure that the DAP is accessible for BIOS.
+    assert!(dap_ptr.checked_add(16).unwrap() < 0x10000, "DAP is inaccesible for BIOS.");
+
+    for tries in 0..5 {
+        // If we have failed before, restart boot disk system.
+        if tries > 0 {
+            let mut regs = RegisterState {
+                eax: 0,
+                edx: boot_disk_data.disk_number as u32,
+                ..Default::default()
+            };
+
+            unsafe { bios::interrupt(0x13, &mut regs); }
+
+            assert!(regs.eflags & 1 == 0, "Reseting boot disk system failed.");
+        }
+
+        // Setup proper register state to perform the extended read and ask BIOS to
+        // read one sector.
+        let mut regs = RegisterState {
+            eax: 0x4200,
+            edx: boot_disk_data.disk_number as u32,
+            esi: dap_ptr as u32,
+            ..Default::default()
+        };
+
+        unsafe { bios::interrupt(0x13, &mut regs); }
+
+        if regs.eflags & 1 == 0 {
+            // We have successfuly read 1 sector from disk. Now copy it to the actual destination.
+            buffer.copy_from_slice(&temp_buffer.0);
 
             return;
         }
@@ -163,12 +262,20 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     // Allocate a buffer that will hold whole kernel ELF image.
     let mut kernel = alloc::vec![0; (kernel_sectors as usize) * 512];
 
+    // Check if extended disk services are available.
+    let extended_reads_supported = extended_reads_supported();
+
     // Read the kernel.
     for sector in 0..kernel_sectors {
         let buffer = &mut kernel[(sector as usize) * 512..][..512];
 
         // Read one sector of the kernel to the destination kernel buffer.
-        read_sector(boot_disk_data, kernel_lba + sector, buffer);
+        // Use extended reads if supported.
+        if extended_reads_supported {
+            read_sector_extended(boot_disk_data, kernel_lba + sector, buffer);
+        } else {
+            read_sector(boot_disk_data, kernel_lba + sector, buffer);
+        }
     }
 
     // Make sure that loaded kernel matches our expectations.
