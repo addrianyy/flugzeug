@@ -1,6 +1,16 @@
 [bits 64]
 [default rel]
 
+%macro ymmpush 1
+    sub     rsp, 32
+    vmovdqu [rsp], %1
+%endmacro
+
+%macro ymmpop 1
+    vmovdqu %1, [rsp]
+    add     rsp, 32
+%endmacro
+
 extern handle_interrupt
 
 section .text
@@ -24,30 +34,35 @@ call_handler:
     push qword [r15 + 0x18] ; R15
 
 
-    ; Save processor state.
-    push rax
-    push rcx
-    push rdx
-
-    xor rcx, rcx
-    xgetbv
-
-    mov rcx, gs:[8]
-    xsave64 [rcx]
-
-    pop rdx
-    pop rcx
-    pop rax
-
-
-    ; Save the current stack pointer for the 4th argument (register state).
+    ; Save the current stack pointer for the 4th argument (register state). This needs to be done
+    ; before YMM pushes as register state doesn't have YMMs.
     mov rcx, rsp
+
+
+    ; Save all YMM registers.
+    ymmpush ymm0
+    ymmpush ymm1
+    ymmpush ymm2
+    ymmpush ymm3
+    ymmpush ymm4
+    ymmpush ymm5
+    ymmpush ymm6
+    ymmpush ymm7
+    ymmpush ymm8
+    ymmpush ymm9
+    ymmpush ymm10
+    ymmpush ymm11
+    ymmpush ymm12
+    ymmpush ymm13
+    ymmpush ymm14
+    ymmpush ymm15
+
 
     ; Save the current stack pointer to restore it later.
     mov rbp, rsp
 
     ; Allocate shadow space and align the stack to 16 byte boundary.
-    sub rsp, 0x20
+    sub rsp, 0x30
     and rsp, ~0xf
 
     call handle_interrupt
@@ -56,20 +71,23 @@ call_handler:
     mov rsp, rbp
 
 
-    ; Restore processor state.
-    push rax
-    push rcx
-    push rdx
-
-    xor rcx, rcx
-    xgetbv
-
-    mov rcx, gs:[8]
-    xrstor64 [rcx]
-
-    pop rdx
-    pop rcx
-    pop rax
+    ; Restore all YMM registers.
+    ymmpop ymm15
+    ymmpop ymm14
+    ymmpop ymm13
+    ymmpop ymm12
+    ymmpop ymm11
+    ymmpop ymm10
+    ymmpop ymm9
+    ymmpop ymm8
+    ymmpop ymm7
+    ymmpop ymm6
+    ymmpop ymm5
+    ymmpop ymm4
+    ymmpop ymm3
+    ymmpop ymm2
+    ymmpop ymm1
+    ymmpop ymm0
 
 
     ; Restore the register state.

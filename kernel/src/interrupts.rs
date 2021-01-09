@@ -320,17 +320,17 @@ fn try_handle_interrupt(vector: u8, _frame: &mut InterruptFrame, _error: u64,
                 // Get the time from last tick to this tick.
                 let difference = time::difference(last_tsc, tsc);
 
-                // If the difference is too high that means that someone had interrupts disabled
-                // for too long.
-                if difference > apic::APIC_TIMER_PERIOD * 3.0 + 0.1 {
-                    panic!("Interrupts were disabled for too long ({:.02}s).", difference);
-                }
-
                 if false {
                     if PRINT_IN_INTERRUPTS {
                         println!("Timer tick on CPU {}. Elapsed time: {:.2}ms.", core!().id,
                                  difference * 1000.0);
                     }
+                }
+
+                // If the difference is too high that means that someone had interrupts disabled
+                // for too long.
+                if difference > apic::APIC_TIMER_PERIOD * 3.0 + 0.1 {
+                    panic!("Interrupts were disabled for too long ({:.02}s).", difference);
                 }
             }
 
