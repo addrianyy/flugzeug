@@ -523,21 +523,24 @@ pub unsafe fn initialize() {
         println!("Initialized framebuffer device with {}x{} resolution. (video buffer 0x{:x})",
                  framebuffer_info.width, framebuffer_info.height, framebuffer_info.fb_base);
 
-        if true {
-            if let Some(supported_modes) = core!().boot_block.supported_modes.lock().as_ref() {
-                println!("Supported modes:");
+        if let Some(supported_modes) = core!().boot_block.supported_modes.lock().as_ref() {
+            println!("Supported modes:");
 
-                let count = supported_modes.count as usize;
+            let count = supported_modes.count as usize;
 
-                for (width, height) in &supported_modes.modes[..count] {
-                    println!("  {}x{}", width, height);
+            for (index, (width, height)) in supported_modes.modes[..count].iter().enumerate() {
+                if index > 0 && index % 6 == 0 {
+                    println!();
                 }
 
-                println!();
+                print!("  {:>4}x{:<4}", width, height);
+            }
 
-                if supported_modes.overflow {
-                    println!("WARNING: Detected supported mode list overflow.");
-                }
+            println!();
+            println!();
+
+            if supported_modes.overflow {
+                color_println!(0xffff00, "WARNING: Detected supported mode list overflow.");
             }
         }
     }

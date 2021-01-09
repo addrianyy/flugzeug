@@ -181,8 +181,8 @@ pub unsafe fn initialize() {
                      apics.len() - 1, ap_entrypoint);
         }
     } else {
-        println!("WARNING: Bootloader hasn't provivided realmode AP \
-                 entrypoint so APs won't be laucnhed.");
+        color_println!(0xffff00, "WARNING: Bootloader hasn't provivided realmode AP \
+                                  entrypoint so APs won't be laucnhed.");
 
         if let Some(apics) = &apics {
             println!("Found {} APICs on the system.", apics.len());
@@ -193,7 +193,7 @@ pub unsafe fn initialize() {
 
     let apics = apics.unwrap_or_else(|| {
         if ap_entrypoint.is_some() {
-            println!("WARNING: No APIC table was found on the system.");
+            color_println!(0xffff00, "WARNING: No APIC table was found on the system.");
         }
 
         // If we haven't found APIC table then just report our APIC ID.

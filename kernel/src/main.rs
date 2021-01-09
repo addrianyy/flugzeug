@@ -9,6 +9,7 @@ extern crate alloc;
 #[macro_use] mod print;
 mod vm;
 mod mm;
+mod pci;
 mod once;
 mod apic;
 mod lock;
@@ -48,14 +49,11 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         if core!().id == 0 {
             acpi::initialize();
             time::initialize();
+            pci::initialize();
 
             // Launch APs.
             processors::initialize();
         }
-
-        color_println!(0x00ffff, "Core initialized in {:.2}ms. Core ID: {}. APIC ID {:?}. \
-                       Using {:?}.", time::local_uptime() * 1000.0, core!().id,
-                       core!().apic_id(), core!().apic_mode());
 
         // Notify that this core is online and wait for other cores.
         processors::notify_core_online();
@@ -68,9 +66,8 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
     }
 
     if core!().id == 0 {
-        color_println!(0xff00ff, "Flugzeug OS loaded! Wilkommen! Firmware took {:.2}s, \
-                       OS took {:.2}s.", time::uptime_with_firmware() - time::global_uptime(),
-                       time::global_uptime());
+        color_println!(0xff00ff, "Flugzeug OS loaded in {:.2}ms! {} CPUs, using {:?}.",
+                       time::uptime() * 1000.0, processors::total_cores(), core!().apic_mode());
 
         let mut buffer = [0u8; 256];
 

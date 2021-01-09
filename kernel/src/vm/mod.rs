@@ -10,7 +10,7 @@ use vkernel::VKernel;
 unsafe fn guest_entrypoint() -> ! {
     // If printing in interrupts is enabled we will mess up guest and host interrupt state.
     if !crate::interrupts::PRINT_IN_INTERRUPTS {
-        println!("Running in the VM! Uptime: {:.2}s.", crate::time::global_uptime());
+        println!("Running in the VM! Uptime: {:.2}s.", crate::time::uptime());
     }
 
     asm!(r#"

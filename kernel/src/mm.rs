@@ -452,7 +452,7 @@ unsafe fn cleanup_bootloader() {
              Memory(total_reclaimed), Memory(total_free));
 
     if total_inaccessible > 0 {
-        color_println!(0xffcc00, "WARNING: Kernel physical region size ({}) is too small. \
+        color_println!(0xffff00, "WARNING: Kernel physical region size ({}) is too small. \
                        {} of memory is inaccessible.", Memory(KERNEL_PHYSICAL_REGION_SIZE),
                        Memory(total_inaccessible));
     }

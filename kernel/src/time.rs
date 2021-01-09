@@ -30,27 +30,6 @@ pub fn get() -> u64 {
     get_tsc()
 }
 
-pub fn difference(from: u64, to: u64) -> f64 {
-    assert!(to > from, "`to` ({}) is earlier than `from` ({}).", to, from);
-
-    let khz   = TSC_KHZ.load(Ordering::Relaxed);
-    let delta = to - from;
-
-    delta as f64 / khz as f64 / 1_000.0
-}
-
-pub fn local_uptime() -> f64 {
-    difference(core!().boot_tsc, get_tsc())
-}
-
-pub fn global_uptime() -> f64 {
-    difference(BOOT_TSC.load(Ordering::Relaxed), get_tsc())
-}
-
-pub fn uptime_with_firmware() -> f64 {
-    difference(0, get_tsc())
-}
-
 #[inline(always)]
 pub fn get_tsc() -> u64 {
     unsafe {
@@ -65,6 +44,19 @@ fn get_tsc_ordered() -> u64 {
     unsafe {
         core::arch::x86_64::__rdtscp(&mut aux)
     }
+}
+
+pub fn difference(from: u64, to: u64) -> f64 {
+    assert!(to > from, "`to` ({}) is earlier than `from` ({}).", to, from);
+
+    let khz   = TSC_KHZ.load(Ordering::Relaxed);
+    let delta = to - from;
+
+    delta as f64 / khz as f64 / 1_000.0
+}
+
+pub fn uptime() -> f64 {
+    difference(BOOT_TSC.load(Ordering::Relaxed), get_tsc())
 }
 
 unsafe fn initialize_hpet() {
@@ -89,6 +81,8 @@ pub unsafe fn initialize() {
     const CALIBRATION_MS:         u128 = 50;
     const FEMTOSECONDS_IN_SECOND: u128 = 1_000_000_000_000_000;
 
+    assert!(TSC_KHZ.load(Ordering::Relaxed) == 0, "TSC was already calibrated.");
+
     initialize_hpet();
     
     let mut hpet = HPET.lock();
@@ -98,7 +92,8 @@ pub unsafe fn initialize() {
     // VMs report that it's not supported and we want to test the kernel on them anyways.
     // Timing on these VMs isn't that bad anyways.
     if !cpu::get_features().invariant_tsc {
-        println!("WARNING: Timing may be off because CPU doesn't support invariant TSC.");
+        color_println!(0xffff00, "WARNING: Timing may be off because CPU doesn't support \
+                       invariant TSC.");
     }
 
     // Convert calibration milliseconds to femtoseconds.

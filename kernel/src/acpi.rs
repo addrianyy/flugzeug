@@ -172,17 +172,18 @@ pub unsafe fn initialize() {
     };
 
     let mut table_map = BTreeMap::new();
+    let mut printed   = 0;
 
-    for (index, &(header, payload, payload_size)) in tables.iter().enumerate() {
+    for &(header, payload, payload_size) in &tables {
         // Dump this ACPI table.
-        if true {
-            if let Ok(signature) = core::str::from_utf8(&header.signature) {
-                println!("  {}: 0x{:x}", signature, payload.0);
-            }
-
-            if index + 1 == tables.len() {
+        if let Ok(signature) = core::str::from_utf8(&header.signature) {
+            if printed % 3 == 0 && printed > 0 {
                 println!();
             }
+
+            print!("  {}: 0x{:x}  ", signature, payload.0);
+
+            printed += 1;
         }
 
         // Add table to global ACPI table list.
@@ -190,6 +191,9 @@ pub unsafe fn initialize() {
             .or_insert_with(Vec::new)
             .push((payload, payload_size));
     }
+
+    println!();
+    println!();
 
     // Set global ACPI table map.
     ACPI_TABLES = Some(table_map);
