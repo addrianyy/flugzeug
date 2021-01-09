@@ -172,9 +172,6 @@ pub unsafe fn initialize() {
     // Load new IDT.
     cpu::set_idt(&idtr);
 
-    // Reenable NMIs.
-    cpu::outb(0x70, cpu::inb(0x70) & 0x7f);
-
     *interrupts = Some(Interrupts {
         _idt: idt,
         _gdt: gdt,

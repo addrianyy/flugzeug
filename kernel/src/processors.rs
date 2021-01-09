@@ -94,6 +94,12 @@ pub unsafe fn notify_core_online() {
     while CORES_ONLINE.load(Ordering::SeqCst) != total_cores() {
         core::sync::atomic::spin_loop_hint();
     }
+
+    // All cores are now online and have valid IDT. We can enable NMIs. They are global for the
+    // whole system so we do this only on the BSP.
+    if core!().id == 0 {
+        cpu::outb(0x70, cpu::inb(0x70) & 0x7f);
+    }
 }
 
 unsafe fn parse_madt(payload: PhysAddr, payload_size: usize) -> BTreeSet<u32> {

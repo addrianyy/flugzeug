@@ -18,6 +18,8 @@ entry_16:
     cli
     cld
 
+    ; NMIs were already disabled in `enter_kernel`. A20 line is enabled.
+
     ; Save base address to EBX. We need to make sure that nothing in this whole code
     ; will clobber it.
     mov ebx, eax
@@ -31,20 +33,6 @@ entry_16:
     sub ax, 0x0100
     mov ss, ax
     mov sp, 0x0ff0
-
-    ; Enable A20 line.
-    in   al, 0x92
-    test al, 0x02
-    jnz  after_enable
-    or   al, 0x02
-    and  al, 0xfe
-    out  0x92, al
-    after_enable:
-
-    ; Disable NMIs.
-    in  al, 0x70
-    or  al, 0x80
-    out 0x70, al
 
     ; Offset pointer to GDT by base address.
     mov eax, gdt_32

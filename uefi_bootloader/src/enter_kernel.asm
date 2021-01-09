@@ -26,16 +26,16 @@ enter_kernel:
     cli
     cld
 
+    ; Disable NMIs in case they were not disabled by previous core.
+    in  al, 0x70
+    or  al, 0x80
+    out 0x70, al
+
     ; Move all register arguments to shadow space on the stack.
     mov [rsp + 0x8],  rcx
     mov [rsp + 0x10], rdx
     mov [rsp + 0x18], r8
     mov [rsp + 0x20], r9
-
-    ; Disable NMIs in case they are not disabled on BSP.
-    in  al, 0x70
-    or  al, 0x80
-    out 0x70, al
 
     ; Save current stack in R10 and switch to trampoline stack.
     mov r10, rsp

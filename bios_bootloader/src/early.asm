@@ -391,10 +391,7 @@ entry_16_continue:
     cmp     ebx, [BOOT_DISK_DESC + 12]
     jne     error_16
 
-already_loaded:
-    ; Everything was loaded from disk. Enter 32 bit mode bootloader now.
-
-    ; Enable A20 line.
+    ; Enable A20 line. This is system global so we do this only once.
     in      al, 0x92
     test    al, 0x02
     jnz     after_enable
@@ -403,11 +400,13 @@ already_loaded:
     out     0x92, al
     after_enable:
 
-    ; Disable NMIs.
+    ; Disable NMIs. This is system global so we do this only once.
     in      al, 0x70
     or      al, 0x80
     out     0x70, al
-    
+
+already_loaded:
+    ; Everything was loaded from disk. Enter 32 bit mode bootloader now.
     ; Disable interrupts before entering 32bit mode.
     cli
 
