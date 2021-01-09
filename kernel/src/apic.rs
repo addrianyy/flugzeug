@@ -193,8 +193,10 @@ unsafe fn disable_pic() {
 }
 
 pub unsafe fn initialize() {
+    let mut core_apic = core!().apic.lock();
+
     // Make sure that the APIC hasn't been initialized yet.
-    assert!(core!().apic.lock().is_none(), "APIC was already initialized.");
+    assert!(core_apic.is_none(), "APIC was already initialized.");
 
     let features = cpu::get_features();
 
@@ -241,5 +243,5 @@ pub unsafe fn initialize() {
     // Cache the APIC ID for this core.
     core!().set_apic_id(apic.apic_id());
 
-    *core!().apic.lock() = Some(apic);
+    *core_apic = Some(apic);
 }

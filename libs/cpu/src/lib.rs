@@ -40,12 +40,7 @@ pub fn cpuid_identifier(start: u32, count: usize, mut buffer: &mut [u8]) -> Opti
 
     let size = buffer.iter().position(|x| *x == 0).unwrap_or(buffer.len());
     let name = core::str::from_utf8(&buffer[..size]).map(|identifier| {
-        // This is safe as CPUID identifiers are ASCII only.
-        let size = identifier.rfind(|x| !char::is_whitespace(x))
-            .map(|index| index + 1)
-            .unwrap_or_else(|| identifier.len());
-
-        &identifier[..size]
+        identifier.trim()
     }).ok();
 
     name

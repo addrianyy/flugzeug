@@ -201,6 +201,8 @@ unsafe fn begin_panic() -> bool {
             return false;
         }
 
+        let current_apic_id = apic.apic_id();
+
         // Halt execution of all cores on the system by sending NMI to them.
         // NMI handler will check if we are panicking and if we are then it will
         // halt the processor.
@@ -208,7 +210,7 @@ unsafe fn begin_panic() -> bool {
             let apic_id = apic_id as u32;
 
             // Skip this core.
-            if Some(apic_id) == core!().apic_id() {
+            if apic_id == current_apic_id {
                 continue;
             }
 
