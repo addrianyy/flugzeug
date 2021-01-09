@@ -213,8 +213,11 @@ pub unsafe fn initialize() {
         state |= 1 << 10;
     }
 
-    // Disable the PIC before enabling APIC.
-    disable_pic();
+    // Disable the PIC before enabling APIC. There is only one PIC on the system so do this
+    // for BSP only.
+    if core!().id == 0 {
+        disable_pic();
+    }
 
     // Set the new APIC state.
     cpu::wrmsr(IA32_APIC_BASE, state);

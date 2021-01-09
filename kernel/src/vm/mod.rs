@@ -191,11 +191,11 @@ fn run_kernel_in_vm() {
         }
 
         if unhandled {
-            panic!("Unhandled VM exit {:x?}.", exit)
+            println!("Unhandled VM exit {:x?}.", exit)
         }
 
         if let Some(delivery) = delivery {
-            println!("Intercepted delivery of {:?}.", delivery);
+            println!("Intercepted delivery of {:x?}.", delivery);
         }
 
         if unhandled || delivery.is_some() {

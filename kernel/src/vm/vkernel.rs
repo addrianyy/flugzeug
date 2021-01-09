@@ -163,7 +163,7 @@ impl VKernel {
             let (exit, delivery) = unsafe { self.vm.run() };
 
             if let Some(delivery) = delivery {
-                panic!("Intercepted delivery of {:?}.", delivery);
+                panic!("Intercepted delivery of {:x?}.", delivery);
             }
 
             if let VmExit::Interrupt(Interrupt::Intr) = exit {
