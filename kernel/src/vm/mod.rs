@@ -28,7 +28,7 @@ fn load_segment(vm: &mut Vm, register: SegmentRegister, selector: u16) {
     // Mask off RPL from the selector to get the segment offset.
     let offset = selector & !0b11;
 
-    let segment = if offset == 0 {
+    let mut segment = if offset == 0 {
         Segment::null(selector)
     } else {
         let gdtr     = cpu::get_gdt();
@@ -62,21 +62,23 @@ fn load_segment(vm: &mut Vm, register: SegmentRegister, selector: u16) {
                 base |= (*ptr.add(1) & 0xffff_ffff) << 32;
             }
 
-            // Load base address from MSRs for FS and GS.
-            match register {
-                SegmentRegister::Fs => base = cpu::rdmsr(0xc000_0100),
-                SegmentRegister::Gs => base = cpu::rdmsr(0xc000_0101),
-                _                   => (),
-            }
-
             Segment {
                 selector,
                 base,
-                limit:  limit as u32,
+                limit:  limit   as u32,
                 attrib: attribs as u16,
             }
         }
     };
+
+    unsafe {
+        // Load base address from MSRs for FS and GS.
+        match register {
+            SegmentRegister::Fs => segment.base = cpu::rdmsr(0xc000_0100),
+            SegmentRegister::Gs => segment.base = cpu::rdmsr(0xc000_0101),
+            _                   => (),
+        }
+    }
 
     vm.set_segment_reg(register, segment);
 }
@@ -142,23 +144,13 @@ fn run_kernel_in_vm() {
         vm.set_reg(Register::Rflags,       2);
     }
 
-    vm.intercept(&[
-        // Intercept relevant SVM instructions.
-        Intercept::Vmmcall,
-
-        // Intercept other instructions.
-        Intercept::Hlt,
-
-        // Intercept other stuff.
-        Intercept::FerrFreeze,
-    ], true);
+    vm.intercept(&[Intercept::Vmmcall, Intercept::Hlt, Intercept::FerrFreeze], true);
 
     let mut mapped_pages = 0;
     let mut interrupts   = 0;
 
     'run: loop {
         let (exit, delivery) = unsafe { vm.run() };
-
 
         let mut unhandled = false;
 
@@ -202,7 +194,6 @@ fn run_kernel_in_vm() {
             panic!("VM failure.");
         }
     }
-
 
     println!("Done! Mapped in {} pages. Interrupted {} times.", mapped_pages, interrupts);
 }

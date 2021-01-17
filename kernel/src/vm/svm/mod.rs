@@ -760,6 +760,11 @@ impl Vm {
             self.last_core = core!().id;
         }
 
+        // If any NPT operation modified the TLB we need to flush it.
+        if self.npt.invalidated_tlb {
+            self.flush_tlb();
+        }
+
         // Copy relevant registers from the cache to the VMCB.
         self.vmcb_mut().state.rax    = self.reg(Register::Rax);
         self.vmcb_mut().state.rsp    = self.reg(Register::Rsp);
@@ -963,6 +968,7 @@ impl Vm {
 
         // TLB was flushed, clear the flag to avoid flush next time this VM is ran.
         self.vmcb_mut().control.tlb_control = 0;
+        self.npt.invalidated_tlb            = false;
 
         if self.support_vmcb_clean {
             // So far nothing has been modified in the VMCB. Even though some bits are reserved
