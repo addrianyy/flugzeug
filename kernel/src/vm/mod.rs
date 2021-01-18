@@ -151,8 +151,7 @@ fn run_kernel_in_vm() {
 
     'run: loop {
         let (exit, delivery) = unsafe { vm.run() };
-
-        let mut unhandled = false;
+        let mut unhandled    = false;
 
         match exit {
             VmExit::NestedPageFault { address, .. } => {

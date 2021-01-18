@@ -9,7 +9,6 @@ extern crate alloc;
 #[macro_use] mod print;
 mod vm;
 mod mm;
-mod pci;
 mod once;
 mod apic;
 mod lock;
@@ -49,7 +48,6 @@ extern "C" fn _start(boot_block: PhysAddr, boot_tsc: u64) -> ! {
         if core!().id == 0 {
             acpi::initialize();
             time::initialize();
-            pci::initialize();
 
             // Launch APs.
             processors::initialize();

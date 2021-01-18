@@ -391,12 +391,12 @@ pub enum Event {
 }
 
 const CLEAN_INTERCEPTS_AND_TSC: u32 = 0;
-const CLEAN_NP:  u32                = 4;
-const CLEAN_CR:  u32                = 5;
-const CLEAN_DR:  u32                = 6;
-const CLEAN_DT:  u32                = 7;
-const CLEAN_SEG: u32                = 8;
-const CLEAN_CR2: u32                = 9;
+const CLEAN_NP:                 u32 = 4;
+const CLEAN_CR:                 u32 = 5;
+const CLEAN_DR:                 u32 = 6;
+const CLEAN_DT:                 u32 = 7;
+const CLEAN_SEG:                u32 = 8;
+const CLEAN_CR2:                u32 = 9;
 
 pub struct Vm {
     /// Guest state. It must be configured by the user of the VM. It is loaded just before
@@ -550,7 +550,8 @@ impl Vm {
         // TSC offset starts at 0. Can be adjusted by the user.
         control.tsc_offset = 0;
 
-        // Assign this VM unique ASID. Don't flush anything on VMRUN.
+        // Assign this VM unique ASID. Don't flush anything on VMRUN. VM user can call
+        // `flush_tlb()` to change this behaviour.
         control.guest_asid  = asid;
         control.tlb_control = 0;
 
