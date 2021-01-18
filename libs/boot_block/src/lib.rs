@@ -8,18 +8,28 @@ use rangeset::RangeSet;
 use page_table::PageTable;
 use serial_port::SerialPort;
 
+// 0xffff_8000_0000_0000 - 0xffff_a000_0000_0000      - stacks (32 TB)
+// 0xffff_a000_0000_0000 - 0xffff_f000_0000_0000      - heap (80 TB)
+// 0xffff_f000_0000_0000 - 0xffff_ffff_8000_0000      - physical region (~16 TB)
+// 0xffff_ffff_8000_0000 - 0xffff_ffff_ff00_0000      - kernel area (~2 GB)
+// 0xffff_ffff_ff00_0000 - 0xffff_ffff_ffff_ffff + 1  - unused (16 MB)
+
 /// A region which is used to allocate unique stacks for each core.
-pub const KERNEL_STACK_BASE:    u64 = 0x0000_7473_0000_0000;
+pub const KERNEL_STACK_BASE:    u64 = 0xffff_8000_0000_0000;
 pub const KERNEL_STACK_SIZE:    u64 = 4  * 1024 * 1024;
 pub const KERNEL_STACK_PADDING: u64 = 64 * 1024 * 1024;
 
 /// A region which allows kernel (which uses paging) to access raw physical memory.
-pub const KERNEL_PHYSICAL_REGION_BASE: u64 = 0xffff_cafe_0000_0000;
+pub const KERNEL_PHYSICAL_REGION_BASE: u64 = 0xffff_f000_0000_0000;
 pub const KERNEL_PHYSICAL_REGION_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 
 /// A region which is used by dynamic allocations in the kernel.
-pub const KERNEL_HEAP_BASE:    u64 = 0xffff_8000_0000_0000;
+pub const KERNEL_HEAP_BASE:    u64 = 0xffff_a000_0000_0000;
 pub const KERNEL_HEAP_PADDING: u64 = 4096;
+
+/// Base address of the kernel. As required by System V ABI, image must be between
+/// 0xffff_ffff_8000_0000 and 0xffff_ffff_ff00_0000.
+pub const KERNEL_BASE: u64 = 0xffff_ffff_8000_0000;
 
 pub const MAX_SUPPORTED_MODES: usize = 128;
 

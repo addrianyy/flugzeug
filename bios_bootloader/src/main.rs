@@ -284,7 +284,9 @@ fn setup_kernel(boot_disk_data: &BootDiskData,
     // Parse the kernel ELF file and make sure that it is 64 bit.
     let elf = Elf::parse(&kernel).expect("Failed to parse kernel ELF file.");
     assert!(elf.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
-    assert!(elf.machine() == Machine::Amd64, "Loaded kernel is AMD64 binary.");
+    assert!(elf.machine() == Machine::Amd64, "Loaded kernel is not an AMD64 binary.");
+    assert!(elf.base_address() == boot_block::KERNEL_BASE,
+            "Loaded kernel has invalid base address.");
 
     // Allocate a page table that will be used by the kernel.
     let mut kernel_page_table = PageTable::new(&mut PhysicalMemory)
@@ -544,6 +546,8 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
             locate_acpi();
         }
 
+        *BOOT_BLOCK.ap_entrypoint.lock() = Some(0x8000);
+
         INITIALIZED.store(true, Ordering::Relaxed);
     } else {
         // If we are running for the second time (or later), increase core ID.
@@ -551,14 +555,6 @@ extern "C" fn _start(boot_disk_data: &BootDiskData,
 
         bootlib::verify_cpu();
     }
-
-    // Set AP entrypoint so kernel will be able to launch other processors.
-    let mut ap_entrypoint = BOOT_BLOCK.ap_entrypoint.lock();
-    if ap_entrypoint.is_none() {
-        *ap_entrypoint = Some(0x8000);
-    }
-
-    drop(ap_entrypoint);
 
     // Load and map kernel if required. Also allocate a unique stack for this core.
     let (entry_data, rsp) = setup_kernel(boot_disk_data, boot_disk_descriptor);

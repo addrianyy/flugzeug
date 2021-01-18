@@ -239,7 +239,9 @@ fn load_kernel() -> KernelEntryData {
     // Parse the kernel ELF file and make sure that it is 64 bit.
     let kernel = Elf::parse(&binaries::KERNEL).expect("Failed to parse kernel ELF file.");
     assert!(kernel.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
-    assert!(kernel.machine() == Machine::Amd64, "Loaded kernel is AMD64 binary.");
+    assert!(kernel.machine() == Machine::Amd64, "Loaded kernel is not an AMD64 binary.");
+    assert!(kernel.base_address() == boot_block::KERNEL_BASE,
+            "Loaded kernel has invalid base address.");
 
     let features = cpu::get_features();
 
