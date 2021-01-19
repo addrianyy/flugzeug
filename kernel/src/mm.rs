@@ -494,7 +494,7 @@ pub unsafe fn on_finished_boot_process() {
 
             // Wait for all cores to become ready to switch boot block.
             while READY_CORES.load(Ordering::SeqCst) != crate::processors::total_cores() {
-                core::sync::atomic::spin_loop_hint();
+                core::hint::spin_loop();
             }
 
             // Get the pointer to the boot block in the bootloader memory. We have now
@@ -521,7 +521,7 @@ pub unsafe fn on_finished_boot_process() {
             while block_pointer == 0 {
                 block_pointer = NEW_BOOT_BLOCK.load(Ordering::SeqCst);
 
-                core::sync::atomic::spin_loop_hint();
+                core::hint::spin_loop();
             }
 
             block_pointer as *const BootBlock

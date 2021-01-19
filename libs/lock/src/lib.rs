@@ -90,7 +90,7 @@ impl<T: ?Sized, I: Interrupts> Lock<T, I> {
         while self.locked.compare_exchange_weak(false, true, Ordering::Acquire,
                                                 Ordering::Relaxed).is_err() {
             while self.is_locked() {
-                core::sync::atomic::spin_loop_hint();
+                core::hint::spin_loop();
             }
         }
 

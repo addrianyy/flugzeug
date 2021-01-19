@@ -92,7 +92,7 @@ pub unsafe fn notify_core_online() {
 
     // Wait for all cores to become online.
     while CORES_ONLINE.load(Ordering::SeqCst) != total_cores() {
-        core::sync::atomic::spin_loop_hint();
+        core::hint::spin_loop();
     }
 
     // All cores are now online and have valid IDT. We can enable NMIs. They are global for the
@@ -260,7 +260,7 @@ pub unsafe fn initialize() {
         // If core panics while executing in kernel it will print panic message and we will spin
         // here forever.
         while core_state(apic_id) != CoreState::Online {
-            core::sync::atomic::spin_loop_hint();
+            core::hint::spin_loop();
         }
     }
 }

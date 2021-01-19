@@ -102,7 +102,7 @@ impl EmergencyWriter {
                 }
             }
 
-            core::sync::atomic::spin_loop_hint();
+                core::hint::spin_loop();
         }
 
         let serial_port = if has_core_locals {
@@ -234,7 +234,7 @@ unsafe fn begin_panic() -> bool {
                         break;
                     }
 
-                    core::sync::atomic::spin_loop_hint();
+                    core::hint::spin_loop();
                 }
 
                 // Timeout, we hope that this procesor will get halted soon.
