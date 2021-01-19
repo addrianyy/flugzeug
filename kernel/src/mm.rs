@@ -28,7 +28,6 @@ impl PhysMem for PhysicalMemory {
 
     unsafe fn free_phys(&mut self, phys_addr: PhysAddr, size: usize) -> Option<()> {
         let mut free_memory = core!().boot_block.free_memory.lock();
-        let free_memory     = free_memory.as_mut().unwrap();
 
         free_memory.insert(Range {
             start: phys_addr.0,
@@ -43,7 +42,6 @@ impl PhysMem for PhysicalMemory {
 pub unsafe fn alloc_phys<I: lock::Interrupts>(boot_block: &BootBlock<I>,
                                               layout: Layout) -> Option<PhysAddr> {
     let mut free_memory = boot_block.free_memory.lock();
-    let free_memory     = free_memory.as_mut().unwrap();
 
     free_memory.allocate_limited(
         layout.size()  as u64,
@@ -416,14 +414,14 @@ unsafe fn cleanup_bootloader() {
     let mut total_reclaimed = 0;
 
     // Reclaim boot memory.
-    if let Some(boot_memory) = core!().boot_block.boot_memory.lock().take() {
+    {
+        let boot_memory = core!().boot_block.boot_memory.lock();
+
         for &entry in boot_memory.entries() {
             let size = entry.size();
 
             core!().boot_block.free_memory
                 .lock()
-                .as_mut()
-                .unwrap()
                 .insert(entry);
 
             total_reclaimed += size;
@@ -433,8 +431,10 @@ unsafe fn cleanup_bootloader() {
     let mut total_free         = 0;
     let mut total_inaccessible = 0;
 
-    // Sum up all free memory.
-    if let Some(free_memory) = core!().boot_block.free_memory.lock().as_ref() {
+    // Sum up all free memory and do range checks.
+    {
+        let free_memory = core!().boot_block.free_memory.lock();
+
         for entry in free_memory.entries() {
             total_free += entry.size();
 
@@ -547,10 +547,7 @@ pub unsafe fn on_finished_boot_process() {
 #[allow(unused)]
 pub fn dump_memory_ranges() {
     let entries  = {
-        let free_memory = core!().boot_block.free_memory.lock()
-            .as_ref()
-            .unwrap()
-            .clone();
+        let free_memory = core!().boot_block.free_memory.lock().clone();
 
         let mut entries = alloc::vec::Vec::new();
 
@@ -780,8 +777,6 @@ impl ContiguousRegions {
             let phys_addr = core!().boot_block
                 .free_memory
                 .lock()
-                .as_mut()
-                .unwrap()
                 .allocate_limited(size as u64, 4096, Some(MAX_ACCESSIBLE_PHYSICAL_ADDRESS))
                 .expect("Failed to allocate physically contiguous region.") as u64;
 

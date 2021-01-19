@@ -75,10 +75,10 @@ pub struct BootBlock<I: Interrupts> {
     pub size: u64,
 
     /// Free physical memory ranges available on the system.
-    pub free_memory: Lock<Option<RangeSet>, I>,
+    pub free_memory: Lock<RangeSet, I>,
 
     /// Free physical memory ranges available on the system.
-    pub boot_memory: Lock<Option<RangeSet>, I>,
+    pub boot_memory: Lock<RangeSet, I>,
 
     /// Serial port connection which allows for `print!` macros.
     pub serial_port: Lock<Option<SerialPort>, I>,
@@ -98,8 +98,8 @@ impl<I: Interrupts> BootBlock<I> {
     pub const fn new() -> Self {
         Self {
             size:                   core::mem::size_of::<Self>() as u64,
-            free_memory:            Lock::new(None),
-            boot_memory:            Lock::new(None),
+            free_memory:            Lock::new(RangeSet::new()),
+            boot_memory:            Lock::new(RangeSet::new()),
             serial_port:            Lock::new(None),
             page_table:             Lock::new(None),
             physical_map_page_size: Lock::new(None),

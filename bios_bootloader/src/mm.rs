@@ -1,7 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::convert::TryInto;
 
-use rangeset::{RangeSet, Range};
+use rangeset::Range;
 use page_table::{PhysMem, PhysAddr};
 use crate::BOOT_BLOCK;
 use crate::bios;
@@ -10,23 +10,16 @@ pub struct GlobalAllocator;
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        BOOT_BLOCK.free_memory.lock().as_mut().and_then(|memory| {
-            memory.allocate(layout.size() as u64, layout.align() as u64)
-        }).unwrap_or(0) as *mut u8
+        BOOT_BLOCK.free_memory.lock()
+            .allocate(layout.size() as u64, layout.align() as u64)
+            .unwrap_or(0) as *mut u8
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        BOOT_BLOCK.free_memory.lock().as_mut().and_then(|memory| {
-            // Create an inclusive range for this allocation and give it back to the
-            // free memory set.
+        let start = ptr as u64;
+        let end   = start.checked_add(layout.size().checked_sub(1).unwrap() as u64).unwrap();
 
-            let start = ptr as u64;
-            let end   = start.checked_add(layout.size().checked_sub(1)? as u64)?;
-
-            memory.insert(Range { start, end });
-
-            Some(())
-        }).expect("Failed to free memory.");
+        BOOT_BLOCK.free_memory.lock().insert(Range { start, end });
     }
 }
 
@@ -45,7 +38,6 @@ impl PhysMem for PhysicalMemory {
 
     fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
         let mut free_memory = BOOT_BLOCK.free_memory.lock();
-        let free_memory     = free_memory.as_mut().unwrap();
 
         free_memory.allocate(layout.size() as u64, layout.align() as u64)
             .map(|addr| PhysAddr(addr as u64))
@@ -62,12 +54,8 @@ fn alloc_error_handler(layout: Layout) -> ! {
 
 pub unsafe fn initialize() {
     let mut free_memory = BOOT_BLOCK.free_memory.lock();
-    let mut memory      = RangeSet::new();
 
-    // Skip initialization if the memory manager was already initialized by other CPU.
-    if free_memory.is_some() {
-        return;
-    }
+    assert!(free_memory.entries().is_empty(), "Free memory list was already initialized.");
 
     // Do two passes because some BIOSes are broken.
     for &cleanup_pass in &[false, true] {
@@ -127,9 +115,9 @@ pub unsafe fn initialize() {
                 // Some BIOSes may report that region is free and non-free at the
                 // same time, we don't want to use such regions.
                 if free && !cleanup_pass {
-                    memory.insert(range);
+                    free_memory.insert(range);
                 } else if !free && cleanup_pass {
-                    memory.remove(range);
+                    free_memory.remove(range);
                 }
             }
 
@@ -141,7 +129,5 @@ pub unsafe fn initialize() {
     }
 
     // Remove first 1MB of memory, we store some data there which we don't want to overwrite.
-    memory.remove(Range { start: 0, end: 1024 * 1024 - 1 });
-
-    *free_memory = Some(memory);
+    free_memory.remove(Range { start: 0, end: 1024 * 1024 - 1 });
 }

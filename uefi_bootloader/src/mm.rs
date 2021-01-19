@@ -2,7 +2,7 @@ use core::convert::TryInto;
 use core::alloc::Layout;
 
 use crate::lock::Lock;
-use rangeset::{RangeSet, Range};
+use rangeset::Range;
 use page_table::{PhysMem, PhysAddr};
 
 use crate::{BOOT_BLOCK, efi};
@@ -37,7 +37,6 @@ impl PhysMem for PhysicalMemory {
 
     fn alloc_phys(&mut self, layout: Layout) -> Option<PhysAddr> {
         let mut free_memory = BOOT_BLOCK.free_memory.lock();
-        let free_memory     = free_memory.as_mut().unwrap();
 
         // Make sure we never allocate > 4GB memory.
         free_memory.allocate_limited(layout.size() as u64, layout.align() as u64,
@@ -71,8 +70,6 @@ fn mark_boot_memory(start: u64, size: u64) {
     // Mark this memory as usable after booting.
     BOOT_BLOCK.boot_memory
         .lock()
-        .as_mut()
-        .unwrap()
         .insert(Range { start, end });
 }
 
@@ -82,8 +79,6 @@ fn allocate_boot_memory_internal(size: u64, align: u64, max_address: u64) -> Opt
 
     let pointer = BOOT_BLOCK.free_memory
         .lock()
-        .as_mut()
-        .unwrap()
         .allocate_limited(size, align, Some(max_address))?;
 
     // Mark this memory as usable after booting.
@@ -143,14 +138,8 @@ pub unsafe fn initialize_and_exit_boot_services(image_handle: usize,
     let mut free_memory = BOOT_BLOCK.free_memory.lock();
     let mut boot_memory = BOOT_BLOCK.boot_memory.lock();
 
-    assert!(free_memory.is_none() && boot_memory.is_none(),
+    assert!(free_memory.entries().is_empty() && boot_memory.entries().is_empty(),
             "Memory lists are already initialized.");
-
-    *free_memory = Some(RangeSet::new());
-    *boot_memory = Some(RangeSet::new());
-
-    let mut free_memory = free_memory.as_mut().unwrap();
-    let mut boot_memory = boot_memory.as_mut().unwrap();
 
     let boot_services = &mut *((*system_table).boot_services);
 
