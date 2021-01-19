@@ -55,13 +55,8 @@ impl ImageBuilder for UefiBuilder {
             .open(image_path)
             .expect("Failed to open FAT bootable image.");
 
-        let startup = r#"
-            fs0:
-            flugzeug.efi
-        "#;
-
         image_file
-            .set_len((bootloader.len() + startup.len() + 10 * 0x10_0000) as u64)
+            .set_len((bootloader.len() + 10 * 0x10_0000) as u64)
             .expect("Failed to set length of FAT image file.");
 
         fatfs::format_volume(&image_file, fatfs::FormatVolumeOptions::new())
@@ -70,12 +65,15 @@ impl ImageBuilder for UefiBuilder {
         let fs = fatfs::FileSystem::new(&image_file, fatfs::FsOptions::new())
             .expect("Failed to open FAT32 filesystem.");
 
-        let mut bootloader_file = fs.root_dir().create_file("flugzeug.efi").unwrap();
+        let mut bootloader_file = fs.root_dir()
+            .create_dir("efi")
+            .unwrap()
+            .create_dir("boot")
+            .unwrap()
+            .create_file("bootx64.efi")
+            .unwrap();
+
         bootloader_file.truncate().unwrap();
         bootloader_file.write_all(&bootloader).unwrap();
-
-        let mut startup_file = fs.root_dir().create_file("startup.nsh").unwrap();
-        startup_file.truncate().unwrap();
-        startup_file.write_all(startup.as_bytes()).unwrap();
     }
 }
