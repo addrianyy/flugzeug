@@ -1,5 +1,6 @@
 use std::process::Command;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::io;
 
 #[macro_export]
 macro_rules! make_path {
@@ -11,6 +12,27 @@ macro_rules! make_path {
             $(.join($component))*
             .to_str().unwrap()
     };
+}
+
+#[cfg(windows)]
+pub fn canonicalize<P: AsRef<Path>>(p: P) -> io::Result<PathBuf> {
+    let canonical = p.as_ref().canonicalize()?;
+    let string    = canonical.to_str().unwrap();
+
+    const PREFIX_TO_REMOVE: &str = r"\\?\";
+
+    if string.starts_with(PREFIX_TO_REMOVE) {
+        let string = &string[PREFIX_TO_REMOVE.len()..];
+
+        Ok(PathBuf::from(string.to_owned()))
+    } else {
+        Ok(canonical)
+    }
+}
+
+#[cfg(not(windows))]
+pub fn canonicalize<P: AsRef<Path>>(p: P) -> io::Result<PathBuf> {
+    p.as_ref().canonicalize()
 }
 
 pub fn build(command: &str, directory: Option<&Path>, args: &[&str], envs: &[(&str, &str)],

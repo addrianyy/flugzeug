@@ -11,17 +11,17 @@ fn build_kernel() -> PathBuf {
     fs::create_dir_all(Path::new("build").join("kernel"))
         .expect("Couldn't create `build/kernel` directory.");
 
-    let kernel_dir = Path::new("kernel").canonicalize()
+    let kernel_dir = build::canonicalize(Path::new("kernel"))
         .expect("Couldn't get path to `kernel` directory");
 
-    let kernel_build_dir = Path::new("build").join("kernel").canonicalize()
+    let kernel_build_dir = build::canonicalize(Path::new("build").join("kernel"))
         .expect("Couldn't get path to `build/kernel` directory");
 
     println!("\nCompiling kernel...");
     if !build(
         "cargo", Some(&kernel_dir),
         &[
-            "build", "--release", "--target-dir",
+            "build", "--release", "--offline", "--target-dir",
             make_path!(kernel_build_dir),
         ],
         &[],
@@ -41,10 +41,10 @@ fn build_image<B: ImageBuilder>(kernel_path: &Path) {
     fs::create_dir_all(Path::new("build").join(bootloader_name))
         .expect("Couldn't create `build/xx_bootloader` directory.");
 
-    let bootloader_dir = Path::new(bootloader_name).canonicalize()
+    let bootloader_dir = build::canonicalize(Path::new(bootloader_name))
         .expect("Couldn't get path to `xx_bootloader` directory");
 
-    let bootloader_build_dir = Path::new("build").join(bootloader_name).canonicalize()
+    let bootloader_build_dir = build::canonicalize(Path::new("build").join(bootloader_name))
         .expect("Couldn't get path to `build/xx_bootloader` directory");
     
     let mut builder = B::new(kernel_path, &bootloader_dir, &bootloader_build_dir);
@@ -60,7 +60,7 @@ fn build_image<B: ImageBuilder>(kernel_path: &Path) {
     }).collect();
 
     let mut args = vec![
-        "build", "--release", "--target-dir", make_path!(bootloader_build_dir),
+        "build", "--release", "--offline", "--target-dir", make_path!(bootloader_build_dir),
     ];
 
     args.extend(parameters.args.iter().map(|x| { let x: &str = x; x }));

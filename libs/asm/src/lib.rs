@@ -9,6 +9,38 @@ pub enum Format {
     Win64,
 }
 
+fn try_command(command: &str) -> bool {
+    Command::new(command)
+        .arg("--version")
+        .status()
+        .is_ok()
+}
+
+fn llvm_suffix() -> Option<String> {
+    let commands = ["llvm-ar", "llvm-lib"];
+
+    let suffix_to_string = |suffix| {
+        match suffix {
+            0 => String::new(),
+            _ => format!("-{}", suffix),
+        }
+    };
+
+    if commands.iter().all(|command| try_command(command)) {
+        return Some(suffix_to_string(0));
+    }
+
+    for version in (6..=20).rev() {
+        let suffix = suffix_to_string(version);
+
+        if commands.iter().all(|command| try_command(&format!("{}{}", command, suffix))) {
+            return Some(suffix);
+        }
+    }
+
+    None
+}
+
 /// Build assembly files specified by `source_files` with format `format` and link them
 /// to the current binary.
 pub fn link(source_files: &[impl AsRef<Path>], format: Format) {
@@ -18,6 +50,8 @@ pub fn link(source_files: &[impl AsRef<Path>], format: Format) {
 
     // Tell Rust that libraries that we will link to can be found in the `out_dir` path.
     println!("cargo:rustc-link-search={}", out_dir);
+
+    let llvm_suffix = llvm_suffix().expect("Failed to find working LLVM toolchain.");
 
     let out_dir              = Path::new(&out_dir);
     let (format, is_windows) = match format {
@@ -74,13 +108,13 @@ pub fn link(source_files: &[impl AsRef<Path>], format: Format) {
 
             // We can't directly link to the object file so we need to make a library file first.
             println!("\nMaking library for {}...", libname);
-            let status = Command::new("llvm-lib-10")
+            let status = Command::new(format!("llvm-lib{}", llvm_suffix))
                 .args(&[
                     object_file,
                     &format!("/out:{}", library_file),
                 ])
                 .status()
-                .expect("Failed to invoke `llvm-lib-10`.");
+                .expect("Failed to invoke `llvm-lib`.");
             if !status.success() {
                 panic!("Failed to make library.");
             }
@@ -91,14 +125,14 @@ pub fn link(source_files: &[impl AsRef<Path>], format: Format) {
 
             // We can't directly link to the object file so we need to make an archive file first.
             println!("\nMaking archive for {}...", libname);
-            let status = Command::new("llvm-ar-10")
+            let status = Command::new(format!("llvm-ar{}", llvm_suffix))
                 .args(&[
                     "crus",
                     archive_file,
                     object_file,
                 ])
                 .status()
-                .expect("Failed to invoke `llvm-ar-10`.");
+                .expect("Failed to invoke `llvm-ar`.");
             if !status.success() {
                 panic!("Failed to make archive.");
             }
