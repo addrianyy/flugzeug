@@ -1,0 +1,8 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "kernel/Cargo.toml",
+        "bios_bootloader/Cargo.toml",
+        "uefi_bootloader/Cargo.toml"
+    ],
+    "rust-analyzer.checkOnSave.allTargets": false
+}

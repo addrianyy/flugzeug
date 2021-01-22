@@ -31,7 +31,10 @@ impl ImageBuilder for UefiBuilder {
         let kernel_path = make_path!(self.kernel_path).to_owned();
 
         BuildParameters {
-            args: vec![],
+            args: vec![
+                String::from("--features"),
+                String::from("with_kernel"),
+            ],
             envs: vec![
                 (String::from("FLUGZEUG_KERNEL_PATH"), kernel_path),
             ],

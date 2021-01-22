@@ -236,6 +236,9 @@ fn load_kernel() -> KernelEntryData {
     // allocations.
     let mut ap_entrypoint = unsafe { APEntrypoint::new() };
 
+    assert!(!binaries::KERNEL.is_empty(), "Tried to run UEFI bootloader built \
+            without `with_kernel` feature.");
+
     // Parse the kernel ELF file and make sure that it is 64 bit.
     let kernel = Elf::parse(&binaries::KERNEL).expect("Failed to parse kernel ELF file.");
     assert!(kernel.bitness() == Bitness::Bits64, "Loaded kernel is not 64 bit.");
