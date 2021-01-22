@@ -1,0 +1,9 @@
+version=1
+CID=7e245252
+parentCID=ffffffff
+createType="fullDevice"
+
+# 512 MB divided by sector size (512 bytes).
+RW 1048576 FLAT "D:\Rust\flugzeug\build\flugzeug_uefi" 0
+
+ddb.adapterType = "ide"

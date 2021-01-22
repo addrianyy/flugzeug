@@ -56,7 +56,7 @@ impl ImageBuilder for UefiBuilder {
             .expect("Failed to open FAT bootable image.");
 
         image_file
-            .set_len((bootloader.len() + 10 * 0x10_0000) as u64)
+            .set_len(512 * 1024 * 1024)
             .expect("Failed to set length of FAT image file.");
 
         fatfs::format_volume(&image_file, fatfs::FormatVolumeOptions::new())
@@ -64,6 +64,8 @@ impl ImageBuilder for UefiBuilder {
 
         let fs = fatfs::FileSystem::new(&image_file, fatfs::FsOptions::new())
             .expect("Failed to open FAT32 filesystem.");
+
+        assert_eq!(fs.fat_type(), fatfs::FatType::Fat32, "Created invalid FAT.");
 
         let mut bootloader_file = fs.root_dir()
             .create_dir("efi")
