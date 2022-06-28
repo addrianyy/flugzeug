@@ -10,8 +10,10 @@ pub const MAX_CORES: usize = 1024;
 /// Total number of cores available on the system.
 static TOTAL_CORES: AtomicU32 = AtomicU32::new(0);
 
+const CORE_STATE_NONE: AtomicU8 = AtomicU8::new(CoreState::None as u8);
+
 /// State of all cores on the system.
-static CORE_STATES: [AtomicU8; MAX_CORES] = [AtomicU8::new(CoreState::None as u8); MAX_CORES];
+static CORE_STATES: [AtomicU8; MAX_CORES] = [CORE_STATE_NONE; MAX_CORES];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]

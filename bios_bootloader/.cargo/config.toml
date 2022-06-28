@@ -3,7 +3,7 @@ target = "i586-unknown-none.json"
 
 [target.i586-unknown-none]
 rustflags = [
-    "-Clink-args=-image-base=0x10000",
+    "-Clink-args=--image-base=0x10000",
     "-Crelocation-model=static",
 ]
 

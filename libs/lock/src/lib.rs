@@ -1,6 +1,5 @@
 #![no_std]
 #![allow(clippy::identity_op, clippy::missing_safety_doc)]
-#![feature(const_fn)]
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 

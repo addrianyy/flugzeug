@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(abi_efiapi, panic_info_message, asm)]
+#![feature(abi_efiapi, panic_info_message)]
 
 extern crate libc_routines;
 

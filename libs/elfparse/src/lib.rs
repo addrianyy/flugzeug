@@ -149,7 +149,9 @@ pub struct Elf<'a> {
 
 #[derive(Clone)]
 pub struct Segment<'a> {
+    #[allow(unused)]
     raw_offset: u64,
+    #[allow(unused)]
     raw_size:   u64,
 
     pub bytes: &'a [u8],
@@ -167,7 +169,9 @@ pub struct Segment<'a> {
 
 #[derive(Clone)]
 pub struct Section<'a> {
+    #[allow(unused)]
     raw_offset: u64,
+    #[allow(unused)]
     raw_size:   u64,
 
     pub bytes: Option<&'a [u8]>,

@@ -1,6 +1,7 @@
 #![no_std]
-#![feature(asm)]
 #![allow(clippy::identity_op, clippy::missing_safety_doc)]
+
+use core::arch::asm;
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 
@@ -15,9 +16,30 @@ pub struct Cpuid {
 pub fn cpuid(eax: u32, ecx: u32) -> Cpuid {
     let mut cpuid = Cpuid::default();
 
+
     unsafe {
-        asm!("cpuid", in("eax") eax, in("ecx") ecx,
-            lateout("eax") cpuid.eax, lateout("ebx") cpuid.ebx,
+        #[cfg(target_pointer_width = "32")]
+        asm!(
+            r#"
+                push ebx
+                cpuid
+                mov edi, ebx
+                pop ebx
+            "#,
+            in("eax") eax, in("ecx") ecx,
+            lateout("eax") cpuid.eax, lateout("edi") cpuid.ebx,
+            lateout("ecx") cpuid.ecx, lateout("edx") cpuid.edx);
+
+        #[cfg(target_pointer_width = "64")]
+        asm!(
+            r#"
+                push rbx
+                cpuid
+                mov edi, ebx
+                pop rbx
+            "#,
+            in("eax") eax, in("ecx") ecx,
+            lateout("eax") cpuid.eax, lateout("edi") cpuid.ebx,
             lateout("ecx") cpuid.ecx, lateout("edx") cpuid.edx);
     }
 

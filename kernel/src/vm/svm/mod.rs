@@ -5,6 +5,7 @@ mod vmcb;
 mod utils;
 
 use core::fmt;
+use core::arch::asm;
 
 use crate::mm::{PhysicalPage, ContiguousRegion};
 use crate::once::Once;
@@ -784,8 +785,9 @@ impl Vm {
                 // guest state.
                 clgi
 
-                // Save RBP as it cannot be in the inline assembly clobber list.
+                // Save RBP and RBX as they cannot be in the inline assembly clobber list.
                 push rbp
+                push rbx
 
 
                 // Get host XCR0.
@@ -927,7 +929,8 @@ impl Vm {
                 xrstor64 [r13]
 
 
-                // Restore RBP pushed at the beginning.
+                // Restore RBP and RBX pushed at the beginning.
+                pop rbx
                 pop rbp
 
                 // Reenable all interrupts on the system. If we exited due to interrupt,
@@ -935,9 +938,8 @@ impl Vm {
                 stgi
             "#,
             // All registers except RSP will be clobbered. R8-R14 are also used as inputs
-            // so they are not here. RBP is pushed and popped by the inline assembly.
+            // so they are not here. RBP and RBX are pushed and popped by the inline assembly.
             out("rax") _,
-            out("rbx") _,
             out("rcx") _,
             out("rdx") _,
             out("rdi") _,

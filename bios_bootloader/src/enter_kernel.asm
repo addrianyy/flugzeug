@@ -15,6 +15,7 @@ enter_kernel:
     cli
     cld
 
+
     ; Enable some SSE stuff and PAE which is required for long mode.
     xor eax, eax
     or  eax, (1 <<  9) ; OSFXSR

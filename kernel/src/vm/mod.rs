@@ -1,6 +1,8 @@
 mod svm;
 mod vkernel;
 
+use core::arch::asm;
+
 use svm::{Vm, Register, TableRegister, SegmentRegister, DescriptorTable,
           Segment, VmExit, Intercept, Interrupt};
 use svm::npt::{self, GuestAddr, PageType};

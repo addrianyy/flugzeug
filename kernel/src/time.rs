@@ -1,5 +1,6 @@
 use core::convert::TryInto;
 use core::sync::atomic::{AtomicU64, Ordering};
+use core::arch::asm;
 
 use crate::mm;
 use crate::hpet::Hpet;

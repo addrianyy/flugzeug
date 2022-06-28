@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use core::alloc::Layout;
 use core::alloc::GlobalAlloc;
+use core::arch::asm;
 
 use page_table::{PhysAddr, PageType};
 use crate::lock::{Lock, KernelInterrupts};

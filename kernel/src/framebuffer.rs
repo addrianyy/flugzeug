@@ -1,4 +1,5 @@
 use alloc::{vec, boxed::Box};
+use core::arch::asm;
 
 use crate::{mm, font};
 use crate::lock::Lock;
@@ -592,16 +593,16 @@ unsafe fn dual_copy_32(from: *const u32, to1: *mut u32, to2: *mut u32, size: usi
             2:
                 vmovups ymm0, [rsi]
                 vmovups [rdi], ymm0
-                vmovups [rbx], ymm0
+                vmovups [rdx], ymm0
                 add rsi, 32
                 add rdi, 32
-                add rbx, 32
+                add rdx, 32
                 sub rcx, 32
                 jnz 2b
             "#,
             inout("rsi") from                     => _,
             inout("rdi") to1                      => _,
-            inout("rbx") to2                      => _,
+            inout("rdx") to2                      => _,
             inout("rcx") vectorized_copy_size * 4 => _,
             out("ymm0") _,
         );
@@ -662,15 +663,15 @@ unsafe fn dual_set_32(target1: *mut u32, target2: *mut u32, value: u32, size: us
                 vmovups ymm0, [rsi]
             2:
                 vmovups [rdi], ymm0
-                vmovups [rbx], ymm0
+                vmovups [rdx], ymm0
                 add rdi, 32
-                add rbx, 32
+                add rdx, 32
                 sub rcx, 32
                 jnz 2b
             "#,
             inout("rsi") values.as_ptr()         => _,
             inout("rdi") target1                 => _,
-            inout("rbx") target2                 => _,
+            inout("rdx") target2                 => _,
             inout("rcx") vectorized_set_size * 4 => _,
             out("ymm0") _,
         );

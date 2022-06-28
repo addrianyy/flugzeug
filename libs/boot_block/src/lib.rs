@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(const_fn)]
 
 // Everything here must be exactly the same in 32 bit mode and 64 bit mode.
 

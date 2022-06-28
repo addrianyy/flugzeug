@@ -2,11 +2,10 @@
 target = "x86_64-unknown-none.json"
 
 rustflags = [
-    "-Clink-args=-image-base=0xffffffff80000000",
+    "-Clink-args=--image-base=0xffffffff80000000",
     "-Ccode-model=kernel",
     "-Crelocation-model=static",
 
-    "-Ctarget-feature=+mmx",
     "-Ctarget-feature=+sse",
     "-Ctarget-feature=+sse2",
     "-Ctarget-feature=+sse3",

@@ -21,7 +21,7 @@ fn build_kernel() -> PathBuf {
     if !build(
         "cargo", Some(&kernel_dir),
         &[
-            "build", "--release", "--offline", "--target-dir",
+            "build", "--release", "--target-dir",
             make_path!(kernel_build_dir),
         ],
         &[],
